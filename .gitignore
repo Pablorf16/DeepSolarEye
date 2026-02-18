@@ -1,0 +1,18 @@
+# 1. Ignorar carpetas pesadas de sistema y Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+saved_models/
+
+# 2. Ignorar TODA la carpeta de datos por defecto
+data/
+
+# 3. ¡EXCEPCIÓN! (Opcional)
+# Si quieres subir los CSVs porque pesan poco y son útiles, descomenta la siguiente línea:
+# !data/processed/*.csv
+
+# 4. Asegurarnos de que NUNCA suba el zip ni las imágenes raw
+data/raw/
+*.zip
+*.jpg
+*.png
