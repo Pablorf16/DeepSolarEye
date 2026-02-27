@@ -11,7 +11,7 @@ class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
         
-        # --- BLOQUE DE EXTRACCIÓN DE CARACTERÍSTICAS (Igual al original) ---
+        #BLOQUE DE EXTRACCIÓN DE CARACTERÍSTICAS
         # Capa inicial
         self.conv1 = nn.Conv2d(3, 16, 7, padding=3)
         self.pool = nn.AvgPool2d(3)
@@ -79,7 +79,7 @@ class Net(nn.Module):
         self.fc_final = nn.Linear(96, 1) 
 
     def forward(self, x):
-        # x es la imagen [Batch, 3, 224, 224]
+        
         
         # 1. Capa inicial
         x = self.conv1(x)
@@ -94,13 +94,14 @@ class Net(nn.Module):
         
         # 3. Pooling y Aplanado
         x = self.pool(x)
-        x = x.view(x.shape[0], -1) # Flatten
+        x = x.view(x.shape[0], -1) 
         
         # 4. Clasificador (Fully Connected)
         x = self.relu(self.dropout(self.fu(x)))
         x = self.relu(self.dropout(self.fc0(x)))
         
         # 5. Salida Final
-        x = self.fc_final(x)
         
-        return x
+        x = self.fc_final(x)
+        output = torch.sigmoid(x) * 100.0
+        return output

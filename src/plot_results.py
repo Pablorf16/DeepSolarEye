@@ -2,55 +2,46 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 
-# --- CONFIGURACIÓN ---
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LOG_FILE = os.path.join(BASE_DIR, 'training_log.csv')
-OUTPUT_IMG = os.path.join(BASE_DIR, 'grafica_entrenamiento.png')
-
-def plot_learning_curves():
-    print(f"--- GENERANDO GRÁFICA DE APRENDIZAJE ---")
+def plot_learning_curve():
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    LOG_FILE = os.path.join(BASE_DIR, 'training_log.csv')
+    OUTPUT_DIR = os.path.join(BASE_DIR, 'reports', 'figures')
     
-    # 1. Cargar el historial
     if not os.path.exists(LOG_FILE):
-        print(f"ERROR: No encuentro el archivo {LOG_FILE}")
-        print("¿Ha terminado el entrenamiento?")
+        print(f"[ERROR] No se encuentra el archivo {LOG_FILE}.")
         return
 
-    data = pd.read_csv(LOG_FILE)
+    df = pd.read_csv(LOG_FILE)
     
-    # 2. Configurar el estilo del gráfico (Estilo Académico)
+    # AHORA BUSCAMOS EL MEJOR MODELO EN VALIDACIÓN (Rigor científico)
+    best_epoch = df.loc[df['val_loss'].idxmin()]
+    
     plt.figure(figsize=(10, 6))
-    plt.style.use('ggplot') # Estilo bonito y limpio
     
-    # 3. Dibujar las líneas
-    # Línea Azul: Error en Entrenamiento (Lo que memoriza)
-    plt.plot(data['epoch'], data['train_loss'], 
-             label='Train Loss (Entrenamiento)', 
-             color='tab:blue', marker='o', linewidth=2)
+    # GRAFICAMOS TRAIN VS VAL
+    plt.plot(df['epoch'], df['train_loss'], label='Train Loss (MSE)', color='#1f77b4', linewidth=2, marker='o', markersize=4)
+    plt.plot(df['epoch'], df['val_loss'], label='Val Loss (MSE)', color='#2ca02c', linewidth=2, marker='s', markersize=4)
     
-    # Línea Roja: Error en Test (La realidad)
-    plt.plot(data['epoch'], data['test_loss'], 
-             label='Test Loss (Validación)', 
-             color='tab:red', marker='x', linestyle='--', linewidth=2)
+    plt.scatter(best_epoch['epoch'], best_epoch['val_loss'], color='red', s=100, zorder=5, label=f"Mejor Modelo (Época {int(best_epoch['epoch'])})")
+    plt.annotate(f"{best_epoch['val_loss']:.2f}", 
+                 (best_epoch['epoch'], best_epoch['val_loss']),
+                 textcoords="offset points", 
+                 xytext=(0,10), 
+                 ha='center', fontsize=10, fontweight='bold', color='red')
+
+    plt.title('Curva de Aprendizaje - DeepSolarEye V2', fontsize=14, fontweight='bold', pad=15)
+    plt.xlabel('Épocas (Epochs)', fontsize=12)
+    plt.ylabel('Error Cuadrático Medio (MSE)', fontsize=12)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.legend(loc='upper right', fontsize=10, shadow=True)
     
-    # 4. Etiquetas y Títulos
-    plt.title('Evolución del Error (MSE) - DeepSolarEye', fontsize=14)
-    plt.xlabel('Épocas (Vueltas)', fontsize=12)
-    plt.ylabel('Pérdida (MSE Loss)', fontsize=12)
+    plt.xticks(range(1, int(df['epoch'].max()) + 1))
+    plt.tight_layout()
     
-    # Forzar que el eje X muestre enteros (1, 2, 3, 4, 5)
-    plt.xticks(data['epoch'])
-    
-    plt.legend()
-    plt.grid(True)
-    
-    # 5. Guardar
-    plt.savefig(OUTPUT_IMG, dpi=300) # 300 dpi = Calidad de Impresión
-    print(f"✅ Gráfica guardada en: {OUTPUT_IMG}")
-    print("¡Ya puedes abrirla y enviársela a tu tutor!")
-    
-    # Mostrar en ventana (opcional)
-    plt.show()
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    output_path = os.path.join(OUTPUT_DIR, 'learning_curve_v2.png')
+    plt.savefig(output_path, dpi=300)
+    print(f"✅ ¡Gráfica V2 generada y guardada en: {output_path}")
 
 if __name__ == "__main__":
-    plot_learning_curves()
+    plot_learning_curve()

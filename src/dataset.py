@@ -1,17 +1,29 @@
 import os
 import torch
 import pandas as pd
+import logging
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
+
+# Configurar logging
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
 
 class SolarPanelDataset(Dataset):
     """
     Clase que conecta tus CSVs (creados por data_prep) con PyTorch.
     """
     def __init__(self, csv_path, img_dir, transform=None):
-        # Nota: train.py pasa 'csv_path', así que usamos ese nombre
-        self.data = pd.read_csv(csv_path)
+        
+        try:
+            self.data = pd.read_csv(csv_path)
+        except FileNotFoundError:
+            logger.error(f"CSV no encontrado: {csv_path}")
+            raise
+        except Exception as e:
+            logger.error(f"Error leyendo CSV {csv_path}: {e}")
+            raise
         self.img_dir = img_dir
         self.transform = transform
 
@@ -26,8 +38,8 @@ class SolarPanelDataset(Dataset):
         # 2. Abre la imagen
         try:
             image = Image.open(img_path).convert("RGB")
-        except (IOError, FileNotFoundError):
-            # Seguridad: si falla una foto, devuelve una negra vacía
+        except (IOError, FileNotFoundError) as e:
+            logger.warning(f"Imagen faltante: {img_path}. Usando placeholder negro.")
             image = Image.new('RGB', (224, 224), (0, 0, 0))
 
         # 3. Lee la etiqueta de potencia (Power Loss)
