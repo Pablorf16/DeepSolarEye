@@ -386,21 +386,27 @@ def main() -> None:
     
     # Intentar cargar checkpoint si existe (para reanudar)
     if CHECKPOINT_FILE.exists():
-        logger.info("Encontrado checkpoint anterior, reanudando...")
-        checkpoint = torch.load(str(CHECKPOINT_FILE), map_location=DEVICE)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])  # Restaurar scheduler
-        start_epoch = checkpoint['epoch'] + 1
-        best_val_rmse = checkpoint['best_val_rmse']
-        epochs_no_improve = checkpoint['epochs_no_improve']
-        
-        # Cargar historial previo
-        if LOG_FILE.exists():
-            history = pd.read_csv(str(LOG_FILE)).to_dict('records')
-        
-        print(f"   ✅ Reanudando desde época {start_epoch + 1}")
-        print(f"   ✅ Best val RMSE: {best_val_rmse:.4f}")
+        logger.info("Encontrado checkpoint anterior...")
+        try:
+            checkpoint = torch.load(str(CHECKPOINT_FILE), map_location=DEVICE)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            start_epoch = checkpoint['epoch'] + 1
+            best_val_rmse = checkpoint['best_val_rmse']
+            epochs_no_improve = checkpoint['epochs_no_improve']
+
+            # Cargar historial previo
+            if LOG_FILE.exists():
+                history = pd.read_csv(str(LOG_FILE)).to_dict('records')
+
+            print(f"   ✅ Reanudando desde época {start_epoch + 1}")
+            print(f"   ✅ Best val RMSE: {best_val_rmse:.4f}")
+
+        except RuntimeError as e:
+            logger.warning(f"Checkpoint incompatible con modelo actual: {e}")
+            logger.warning("Iniciando entrenamiento desde cero...")
+            # Reset a valores iniciales (ya definidos arriba)
     else:
         logger.info("Empezando entrenamiento desde cero")
     
@@ -549,6 +555,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
 

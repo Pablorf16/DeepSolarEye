@@ -174,7 +174,7 @@ class Net(nn.Module):
         
         Returns:
             torch.Tensor: Predicciones de pérdida de potencia.
-                         Shape: [B]
+                         Shape: [B, 1] (train.py aplica squeeze(dim=1) → [B])
                          Rango esperado: ~[0, 100]
                          Rango posible: [-∞, +∞] (diagnóstico sin restricción)
         
@@ -228,6 +228,8 @@ class Net(nn.Module):
         # Interpretación:
         # - ~[0, 100]: predicciones en rango físicamente esperado
         # - <0 o >100: diagnóstico de problemas de aprendizaje
-        output = self.fc_final(x).squeeze()
+        output = self.fc_final(x)  # Retorna [B, 1], train.py hace squeeze(dim=1)
         
         return output
+
+
