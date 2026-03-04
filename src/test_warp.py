@@ -1,62 +1,76 @@
 # src/test_warp.py
+
 import cv2
 import numpy as np
 import os
+from pathlib import Path
 
 def probar_recorte():
     print("--- INICIANDO PRUEBA DE RECORTE (ROI) ---")
     
     # 1. Rutas base
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    IMAGE_NAME = "solar_Fri_Jun_16_6__0__25_2017_L_0.0901960784314_I_0.003.jpg"
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    RAW_DATA_DIR = BASE_DIR / "data" / "raw" / "Solar_Panel_Soiling_Image_dataset" / "PanelImages"
     
-    # 2. LA RUTA CORREGIDA: Añadimos las subcarpetas que encontraste
-    IMAGE_PATH = os.path.join(
-        BASE_DIR, 
-        "data", 
-        "raw", 
-        "Solar_Panel_Soiling_Image_dataset", 
-        "PanelImages", 
-        IMAGE_NAME
-    )
+    print(f"Buscando imágenes en:\n{RAW_DATA_DIR}")
     
-    OUTPUT_DIR = os.path.join(BASE_DIR, "reports", "figures", "warp_test")
+    # 2. Búsqueda ROBUSTA de imágenes (múltiples extensiones)
+    # Soporta: .jpg, .jpeg, .png, .JPG, .JPEG, .PNG (case-insensitive)
+    valid_extensions = {'.jpg', '.jpeg', '.png', '.JPG', '.JPEG', '.PNG'}
+    image_files = []
     
-    print(f"Buscando imagen en:\n{IMAGE_PATH}")
+    for path in RAW_DATA_DIR.rglob('*'):
+        if path.is_file() and path.suffix.lower() in valid_extensions:
+            image_files.append(path)
     
-    # 3. Comprobación de existencia
-    if not os.path.exists(IMAGE_PATH):
-        print("\n[ERROR CRÍTICO] Sigo sin encontrar el archivo.")
-        print("Revisa si el nombre de la imagen termina en .jpg o si Windows ocultó la extensión.")
+    if not image_files:
+        print("\n[ERROR] No se encontraron imágenes en la carpeta.")
+        print(f"Extensiones soportadas: .jpg, .jpeg, .png")
+        print(f"Verifica que existan imágenes en:\n{RAW_DATA_DIR}")
         return
-
-    # 4. Lectura a prueba de fallos en Windows
-    img = cv2.imdecode(np.fromfile(IMAGE_PATH, dtype=np.uint8), cv2.IMREAD_COLOR)
+    
+    # Seleccionar la primera imagen encontrada
+    IMAGE_PATH = image_files[0]
+    print(f"✅ Imagen encontrada: {IMAGE_PATH.name}\n")
+    
+    OUTPUT_DIR = BASE_DIR / "reports" / "figures" / "warp_test"
+    
+    # 3. Lectura robusta en Windows
+    img = cv2.imdecode(np.fromfile(str(IMAGE_PATH), dtype=np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         print("\n[ERROR] El archivo existe, pero OpenCV no puede abrirlo.")
+        print(f"Verifica que sea una imagen válida: {IMAGE_PATH}")
         return
 
-    print("¡Imagen encontrada y cargada! Aplicando Transformación de Perspectiva...")
-
-    # 5. Geometría (Tus coordenadas)
-    pts_origen = np.float32([[80, 19], [190, 35], [153, 162], [16, 140]])
+    print("✅ Imagen cargada exitosamente. Aplicando Transformación de Perspectiva...")
+    
+    # 4. Geometría (Coordenadas genéricas aproximadas, relativas a dimensión de imagen)
+    h, w = img.shape[:2]
+    pts_origen = np.float32([
+        [w * 0.15, h * 0.10],   # Esquina superior izquierda
+        [w * 0.85, h * 0.15],   # Esquina superior derecha
+        [w * 0.85, h * 0.95],   # Esquina inferior derecha
+        [w * 0.15, h * 0.90]    # Esquina inferior izquierda
+    ])
     pts_destino = np.float32([[0, 0], [224, 0], [224, 224], [0, 224]])
     
-    # 6. Transformación matemática
+    # 5. Transformación matemática
     matriz = cv2.getPerspectiveTransform(pts_origen, pts_destino)
     img_aplanada = cv2.warpPerspective(img, matriz, (224, 224))
     
-    # 7. Dibujar el polígono para visualización
+    # 6. Dibujar el polígono para visualización
     img_marcada = img.copy()
     cv2.polylines(img_marcada, [np.int32(pts_origen)], isClosed=True, color=(0, 255, 0), thickness=2)
     
-    # 8. Guardar
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    cv2.imwrite(os.path.join(OUTPUT_DIR, "1_marcada.jpg"), img_marcada)
-    cv2.imwrite(os.path.join(OUTPUT_DIR, "2_aplanada.jpg"), img_aplanada)
+    # 7. Guardar resultados
+    os.makedirs(str(OUTPUT_DIR), exist_ok=True)
+    cv2.imwrite(str(OUTPUT_DIR / "1_marcada.jpg"), img_marcada)
+    cv2.imwrite(str(OUTPUT_DIR / "2_aplanada.jpg"), img_aplanada)
     
     print(f"\n✅ ¡Transformación completada con éxito!")
-    print(f"Revisa las imágenes en: {OUTPUT_DIR}")
+    print(f"   Original detectado: {IMAGE_PATH.name}")
+    print(f"   Dimensiones: {w}×{h}")
+    print(f"   Salida: {OUTPUT_DIR}")
 
 if __name__ == "__main__":
     probar_recorte()

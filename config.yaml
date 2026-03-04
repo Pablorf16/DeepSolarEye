@@ -1,0 +1,91 @@
+# config.yaml - Configuración centralizada DeepSolarEye
+# 
+# Este archivo contiene TODOS los hiperparámetros.
+# Cambiar aquí es más fácil que editar el código fuente.
+#
+# IMPORTANTE: Después de cambiar, debes JUSTIFICAR por qué.
+# No cambies valores "porque la IA lo recomendó".
+
+# ====== REPRODUCIBILIDAD ======
+random_seed: 42
+description: "Training con RMSE, métricas completas, sin sigmoid en modelo"
+
+# ====== INGENIERÍA DEL ENTRENAMIENTO ======
+device: "cuda"  # "cuda" o "cpu"
+batch_size: 32
+learning_rate: 0.0001  # REDUCIDO de 0.001 (ver análisis del tutor)
+max_epochs: 50
+
+# ====== EARLY STOPPING ======
+# JUSTIFICACIÓN: patience=7 significa 7 épocas sin mejora en validación.
+# Teoría: Si no mejora en 7 épocas, probablemente tenemos un problema
+# anterior (LR muy alto, datos mal, etc.)
+# 
+# TODO: Analizar si esto es correcto con nueva LR=0.0001
+patience: 7
+early_stopping_metric: "val_rmse"  # "val_rmse", "val_mae", "val_r_squared"
+
+# ====== LEARNING RATE SCHEDULER ======
+# Reduce LR cuando el loss se estanca (ReduceLROnPlateau)
+use_lr_scheduler: True
+scheduler_factor: 0.5  # Multiplica LR por 0.5 cuando se estanca
+scheduler_patience: 3  # Después de 3 épocas sin mejora
+
+# ====== DATA AUGMENTATION ======
+# Se añadieron transformaciones que sugirió el tutor:
+# - RandomVerticalFlip (nuevo)
+# - RandomRotation(90°) (nuevo)
+augmentation:
+  horizontal_flip: True
+  vertical_flip: True      # NUEVO
+  rotation_90: True         # NUEVO: Rotaciones de 90° como sugirió tutor
+  random_crop: False
+
+# ====== DATOS Y CATEGORIZACIÓN ======
+# CATEGORÍAS DE SUCIEDAD (del dataset)
+# JUSTIFICACIÓN DE LÍMITES:
+# - Los límites (5, 15, 30, 60) fueron elegidos para:
+#   1. Representar niveles cualitativos de degradación visual
+#   2. Balancear aproximadamente el número de muestras por clase
+#   3. Alinearse con estándares de industria solar (TBD: verificar refs)
+#
+# TODO: Documentar con referencias o análisis de distribución
+stratified_split:
+  train_ratio: 0.60
+  val_ratio: 0.20
+  test_ratio: 0.20
+  
+dirt_categories:
+  - name: "Limpio"
+    range: [0, 5]
+    description: "Panel limpio o con mínima suciedad"
+  - name: "Leve"
+    range: [5, 15]
+    description: "Suciedad notoria pero No crítica"
+  - name: "Moderado"
+    range: [15, 30]
+    description: "Suciedad moderada, impacto visual"
+  - name: "Alto"
+    range: [30, 60]
+    description: "Suciedad severa, degradación significativa"
+  - name: "Crítico"
+    range: [60, 100]
+    description: "Suciedad extrema, panel prácticamente inútil"
+
+# ====== REPORTE DE MÉTRICAS ======
+# Qué métricas reportar y en qué orden
+metrics_to_track:
+  - "mse"
+  - "rmse"
+  - "mae"
+  - "mape"
+  - "r_squared"
+
+# ====== CHECKPOINTS ======
+save_best_model: True
+save_interval: 1  # Guardar checkpoint cada N épocas (0 = deshabilitar)
+
+# ====== LOGGING ======
+log_level: "INFO"  # "DEBUG", "INFO", "WARNING", "ERROR"
+log_to_file: True
+log_file: "training.log"
