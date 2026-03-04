@@ -16,12 +16,11 @@ import logging
 import re
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
 # Importar configuración centralizada
-from config import CATEGORY_BINS, CATEGORY_LABELS, RANDOM_STATE
+from src.config import CATEGORY_BINS, CATEGORY_LABELS, DATA_SPLIT, RANDOM_STATE
 
 # Configurar logging
 logging.basicConfig(
@@ -278,7 +277,7 @@ def process_and_split() -> None:
     # Paso 1: Separar 60% para train, 40% para temp (val+test)
     train_df, temp_df = train_test_split(
         df,
-        test_size=0.40,  # 40% para val+test
+        test_size=(DATA_SPLIT['val'] + DATA_SPLIT['test']),  # Proporción para val+test
         random_state=RANDOM_STATE,
         stratify=df['dirt_category']
     )
@@ -287,7 +286,7 @@ def process_and_split() -> None:
     # (50% del 40% = 20% total)
     val_df, test_df = train_test_split(
         temp_df,
-        test_size=0.50,  # 50% del 40% = 20% total
+        test_size=DATA_SPLIT['test'] / (DATA_SPLIT['val'] + DATA_SPLIT['test']),  # Test/(Val+Test)
         random_state=RANDOM_STATE,
         stratify=temp_df['dirt_category']
     )
@@ -317,3 +316,6 @@ def process_and_split() -> None:
 
 if __name__ == "__main__":
     process_and_split()
+
+
+

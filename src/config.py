@@ -8,6 +8,8 @@ Esto facilita:
   3. Reproducibilidad: SEED centralizado y controlado
 """
 
+import torch
+
 # ============================================================
 # CATEGORÍAS DE SUCIEDAD (Bins Estratificados)
 # ============================================================
@@ -100,8 +102,8 @@ ES_PATIENCE = 12
 # Si val_rmse no mejora durante 5 épocas → LR *= 0.1
 SCHEDULER_PATIENCE = 5
 
-# Device (será sobrescrito en train.py con detección automática)
-DEVICE = 'cuda'  # Se reemplaza con 'cuda' si disponible, senó 'cpu'
+# Dispositivo de computación (GPU si disponible, CPU en caso contrario)
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ============================================================
 # ESTRATEGIA DE MÉTRICAS v3.0
@@ -277,3 +279,5 @@ OUT_OF_BOUNDS_DIAGNOSTIC = True
 # Límites del rango físicamente válido
 OUT_OF_BOUNDS_MIN = 0     # Power loss mínimo: 0% (panel perfecto)
 OUT_OF_BOUNDS_MAX = 100   # Power loss máximo: 100% (panel sin función)
+
+

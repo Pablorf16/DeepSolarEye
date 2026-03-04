@@ -30,7 +30,8 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from config import (
+from src.config import (
+    DEVICE,
     BATCH_SIZE,
     BEST_MODEL_NAME,
     CATEGORY_BINS,
@@ -43,8 +44,8 @@ from config import (
     SEED,
     TRAINING_LOG_NAME,
 )
-from dataset import SolarPanelDataset, get_transforms
-from model import Net
+from src.dataset import SolarPanelDataset, get_transforms
+from src.model import Net
 
 # ============================================================
 # CONFIGURACIÓN DE LOGGING
@@ -74,8 +75,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(SEED)
     torch.backends.cudnn.deterministic = True
 
-# Detectar dispositivo (GPU si disponible, sino CPU)
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
 
 # Rutas dinámicas (usando pathlib para coherencia cross-platform)
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -311,8 +311,7 @@ def main() -> None:
             str(TRAIN_CSV),
             str(IMG_DIR),
             transform=get_transforms('train'),
-            verbose=True
-        )
+            )
         
         # Val: original (sin oversample)
         val_ds = SolarPanelDataset(
@@ -363,14 +362,14 @@ def main() -> None:
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     
     # ReduceLROnPlateau: reduce LR cuando val_rmse no mejora
+    # Nota: verbose=True está deprecated en PyTorch 2.0+, se utiliza logging en su lugar
     scheduler = ReduceLROnPlateau(
         optimizer,
         mode='min',           # Minimizar RMSE
         factor=0.1,           # LR *= 0.1
         patience=SCHEDULER_PATIENCE,
-        verbose=True
     )
-    
+
     print(f"   ✅ Modelo en {DEVICE}")
     print(f"   ✅ Optimizer: Adam(lr={LEARNING_RATE})")
     print(f"   ✅ Scheduler: ReduceLROnPlateau(patience={SCHEDULER_PATIENCE})")
@@ -390,6 +389,7 @@ def main() -> None:
         checkpoint = torch.load(str(CHECKPOINT_FILE), map_location=DEVICE)
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])  # Restaurar scheduler
         start_epoch = checkpoint['epoch'] + 1
         best_val_rmse = checkpoint['best_val_rmse']
         epochs_no_improve = checkpoint['epochs_no_improve']
@@ -462,6 +462,7 @@ def main() -> None:
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),  # ReduceLROnPlateau state
                 'best_val_rmse': best_val_rmse,
                 'epochs_no_improve': epochs_no_improve
             }, str(CHECKPOINT_FILE))
@@ -547,3 +548,12 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+

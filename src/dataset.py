@@ -7,10 +7,8 @@ con transformaciones y validación robusta de rutas.
 
 import logging
 import os
-from pathlib import Path
 from typing import Callable, Optional
 
-import numpy as np
 import pandas as pd
 import torch
 from PIL import Image
@@ -18,7 +16,8 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 # Importar configuración centralizada
-from config import (
+from src.config import (
+    AUGMENTATION_STRATEGY,
     CATEGORY_BINS,
     CATEGORY_LABELS,
     IMG_SIZE,
@@ -282,13 +281,13 @@ def get_transforms(phase: str = 'train') -> transforms.Compose:
             # Redimensiona a 224×224 (tamaño entrada modelo)
             transforms.Resize((IMG_SIZE, IMG_SIZE)),
             # Volteo horizontal aleatorio (p=50%)
-            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomHorizontalFlip(p=AUGMENTATION_STRATEGY['horizontal_flip']),
             # Volteo vertical aleatorio (p=50%)
-            transforms.RandomVerticalFlip(p=0.5),
+            transforms.RandomVerticalFlip(p=AUGMENTATION_STRATEGY['vertical_flip']),
             # Rotación CONTINUA en rango [-180°, +180°] = círculo completo
-            # torchvision.transforms.RandomRotation(degrees=180) rota dentro
+            # torchvision.transforms.RandomRotation(degrees=AUGMENTATION_STRATEGY['rotation_degrees']) rota dentro
             # de este rango de forma aleatoria uniforme
-            transforms.RandomRotation(degrees=180),
+            transforms.RandomRotation(degrees=AUGMENTATION_STRATEGY['rotation_degrees']),
             # Convierte PIL Image → torch.Tensor en rango [0, 1]
             transforms.ToTensor(),
             # Normaliza con parámetros ImageNet (media y desv. estándar)
@@ -305,3 +304,6 @@ def get_transforms(phase: str = 'train') -> transforms.Compose:
             # Normalizar
             transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
         ])
+
+
+
