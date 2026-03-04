@@ -6,5 +6,6 @@ torchvision
 pillow
 opencv-python
 matplotlib
+seaborn
 tqdm
 scipy
