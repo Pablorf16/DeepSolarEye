@@ -16,3 +16,4 @@ data/raw/
 *.zip
 *.jpg
 *.png
+.claude/
