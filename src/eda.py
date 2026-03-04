@@ -120,7 +120,7 @@ def plot_category_distribution(csv_path: Path, output_dir: Path) -> bool:
         plt.figure(figsize=(10, 6))
         
         # Contar por categoría y ordenar
-        category_counts = df['dirt_category'].value_counts().reindex(CATEGORY_LABELS)
+        category_counts = df['dirt_category'].value_counts().reindex(CATEGORY_LABELS).fillna(0).astype(int)
         
         # Colores por severidad
         colors = ['#2ecc71', '#f1c40f', '#e67e22', '#e74c3c', '#8e44ad']
@@ -225,3 +225,4 @@ def run_eda() -> None:
 
 if __name__ == "__main__":
     run_eda()
+
