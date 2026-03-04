@@ -41,6 +41,7 @@ from src.config import (
     LEARNING_RATE,
     MAX_EPOCHS,
     SCHEDULER_PATIENCE,
+    SCHEDULER_FACTOR,
     SEED,
     TRAINING_LOG_NAME,
 )
@@ -133,7 +134,7 @@ def train_one_epoch(
         outputs = model(images)
         
         # Backward pass
-        loss = criterion(outputs.squeeze(), labels)  # MSE
+        loss = criterion(outputs.squeeze(dim=1), labels)  # MSE
         loss.backward()
         optimizer.step()
         
@@ -191,14 +192,14 @@ def validate(
             
             # Forward pass
             outputs = model(images)
-            loss = criterion(outputs.squeeze(), labels)
+            loss = criterion(outputs.squeeze(dim=1), labels)
             
             # Acumular MSE
             total_mse += loss.item() * images.size(0)
             num_samples += images.size(0)
             
             # Guardar predicciones para métricas finales
-            all_preds.extend(outputs.squeeze().cpu().numpy().flatten())
+            all_preds.extend(outputs.squeeze(dim=1).cpu().numpy().flatten())
             all_labels.extend(labels.cpu().numpy().flatten())
     
     # Convertir listas a arrays
@@ -366,7 +367,7 @@ def main() -> None:
     scheduler = ReduceLROnPlateau(
         optimizer,
         mode='min',           # Minimizar RMSE
-        factor=0.1,           # LR *= 0.1
+        factor=SCHEDULER_FACTOR,  # LR *= SCHEDULER_FACTOR
         patience=SCHEDULER_PATIENCE,
     )
 
@@ -548,6 +549,8 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
 
 
 

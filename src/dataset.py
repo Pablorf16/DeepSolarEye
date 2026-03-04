@@ -275,6 +275,14 @@ def get_transforms(phase: str = 'train') -> transforms.Compose:
         >>> img_tensor = train_transform(img)  # [3, 224, 224]
     """
     
+   
+    # Validación del parámetro phase
+    valid_phases = {'train', 'val', 'test'}
+    if phase not in valid_phases:
+        raise ValueError(
+            f"phase debe ser 'train', 'val' o 'test', recibido: '{phase}'"
+        )
+    
     if phase == 'train':
         # Augmentación agresiva para entrenamiento
         return transforms.Compose([
@@ -304,6 +312,7 @@ def get_transforms(phase: str = 'train') -> transforms.Compose:
             # Normalizar
             transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
         ])
+
 
 
 

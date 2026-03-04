@@ -19,6 +19,7 @@ from src.config import (  # noqa: F401
     MAX_EPOCHS,
     ES_PATIENCE,
     SCHEDULER_PATIENCE,
+    SCHEDULER_FACTOR,
 )
 from src.model import Net  # noqa: F401
 from src.dataset import SolarPanelDataset  # noqa: F401
@@ -31,6 +32,7 @@ __all__ = [
     'MAX_EPOCHS',
     'ES_PATIENCE',
     'SCHEDULER_PATIENCE',
+    'SCHEDULER_FACTOR',
     'Net',
     'SolarPanelDataset',
     'parse_filename_regex',

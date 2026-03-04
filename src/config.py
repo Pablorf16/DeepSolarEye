@@ -101,6 +101,7 @@ ES_PATIENCE = 12
 # Patrón: Scheduler reduce LR → modelo se recupera → ES lo ve
 # Si val_rmse no mejora durante 5 épocas → LR *= 0.1
 SCHEDULER_PATIENCE = 5
+SCHEDULER_FACTOR = 0.1  # Factor de reducción: LR_nuevo = LR_actual * factor
 
 # Dispositivo de computación (GPU si disponible, CPU en caso contrario)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
