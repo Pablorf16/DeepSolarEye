@@ -536,7 +536,7 @@ def main() -> None:
     
     print(f"\n📊 Generando gráficas de entrenamiento...")
     try:
-        from plot_results import plot_training_curves_v3
+        from src.plot_results import plot_training_curves_v3
         
         plot_training_curves_v3(str(LOG_FILE), str(SAVE_DIR))
         logger.info("Gráficas generadas con éxito")
@@ -548,6 +548,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
 
