@@ -1,7 +1,7 @@
 ﻿"""
-train.py - Entrenamiento de DeepSolarEye v3.0
+train.py - Entrenamiento de DeepSolarEye v3.1
 
-Implementación completa del plan de ejecución v3.0:
+Implementación completa del plan de ejecución v3.1:
   1. Sin sigmoid en salida (regresión abierta)
   2. Stratified split documentado
   3. RMSE (optimizing) + R²,MAE (diagnostic)
@@ -64,7 +64,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# CONFIGURACIÓN v3.0
+# CONFIGURACIÓN v3.1
 # ============================================================
 
 # Reproducibilidad: SEED fijo (importado de config.py)
@@ -154,7 +154,7 @@ def validate(
     model: nn.Module,
     loader: DataLoader,
     criterion: nn.Module,
-) -> Tuple[float, float, float, np.ndarray, np.ndarray, float]:
+) -> Tuple[float, float, float, np.ndarray, np.ndarray, float, dict]:
     """
     Evalúa el modelo en un conjunto de validación o test.
     
@@ -162,6 +162,7 @@ def validate(
     - RMSE: Métrica de optimización (penaliza errores grandes)
     - MAE, R²: Métricas de diagnóstico
     - Out-of-bounds: Indicador de problemas
+    - RMSE por categoría: Diagnóstico de outliers (v3.1)
     
     Args:
         model (nn.Module): Red neuronal en modo evaluación
@@ -169,7 +170,7 @@ def validate(
         criterion (nn.Module): Función de pérdida
     
     Returns:
-        Tuple: (rmse, mae, r2, y_true, y_pred, out_of_bounds_pct)
+        Tuple: (rmse, mae, r2, y_true, y_pred, out_of_bounds_pct, rmse_by_cat)
             donde:
             - rmse (float): Raíz del error cuadrático medio
             - mae (float): Error absoluto medio
@@ -177,6 +178,7 @@ def validate(
             - y_true (np.ndarray): Labels verdaderos
             - y_pred (np.ndarray): Predicciones del modelo
             - out_of_bounds_pct (float): % de predicciones fuera [0, 100]
+            - rmse_by_cat (dict): RMSE por categoría para diagnóstico outliers
     """
     model.eval()
     total_mse = 0.0
@@ -184,7 +186,7 @@ def validate(
     all_labels = []
     num_samples = 0
     
-    # Evaluación sin cálculo de gradientes (mais rápido)
+    # Evaluación sin cálculo de gradientes (más rápido)
     with torch.no_grad():
         for images, labels in loader:
             images = images.to(DEVICE)
@@ -216,7 +218,24 @@ def validate(
     out_of_bounds = np.sum((all_preds < 0) | (all_preds > 100))
     out_of_bounds_pct = 100 * out_of_bounds / len(all_preds)
     
-    return rmse, mae, r2, all_labels, all_preds, out_of_bounds_pct
+    # v3.1: Calcular RMSE por categoría para diagnóstico de outliers
+    # Ratio MAE/RMSE = 0.64 (esperado 0.8) indica presencia de outliers
+    rmse_by_cat = {}
+    true_cats = pd.cut(
+        all_labels,
+        bins=CATEGORY_BINS,
+        labels=CATEGORY_LABELS,
+        include_lowest=True
+    )
+    for cat in CATEGORY_LABELS:
+        mask = (true_cats == cat)
+        if mask.sum() > 0:
+            cat_mse = np.mean((all_preds[mask] - all_labels[mask]) ** 2)
+            rmse_by_cat[cat] = np.sqrt(cat_mse)
+        else:
+            rmse_by_cat[cat] = 0.0
+    
+    return rmse, mae, r2, all_labels, all_preds, out_of_bounds_pct, rmse_by_cat
 
 
 def generate_final_report(
@@ -288,7 +307,7 @@ def main() -> None:
     # ============================================================
     
     print(f"\n{'='*60}")
-    print("🚀 INICIANDO ENTRENAMIENTO DeepSolarEye v3.0")
+    print("🚀 INICIANDO ENTRENAMIENTO DeepSolarEye v3.1")
     print("="*60)
     print(f"Dispositivo:        {DEVICE}")
     print(f"SEED:               {SEED}")
@@ -426,7 +445,7 @@ def main() -> None:
             train_rmse = train_one_epoch(model, train_loader, criterion, optimizer)
             
             # Validar
-            val_rmse, val_mae, val_r2, _, _, val_out_of_bounds = validate(
+            val_rmse, val_mae, val_r2, _, _, val_out_of_bounds, val_rmse_by_cat = validate(
                 model, val_loader, criterion
             )
             
@@ -436,13 +455,20 @@ def main() -> None:
             print(f"   📊 Val MAE:    {val_mae:.4f}%  | R²: {val_r2:.4f}")
             print(f"   🔍 Out-of-bounds: {val_out_of_bounds:.2f}%")
             
+            # v3.1: Reportar RMSE por categoría para identificar outliers
+            rmse_cat_str = " | ".join(
+                f"{cat[:3]}:{val_rmse_by_cat[cat]:.2f}"
+                for cat in CATEGORY_LABELS
+            )
+            print(f"   📋 RMSE/Cat: {rmse_cat_str}")
+            
             # Learning rate scheduler step
             scheduler.step(val_rmse)
             current_lr = optimizer.param_groups[0]['lr']
             print(f"   📈 Learning Rate: {current_lr:.6f}")
             
             # Guardar historial en CSV
-            history.append({
+            history_entry = {
                 'epoch': epoch + 1,
                 'train_rmse': train_rmse,
                 'val_rmse': val_rmse,
@@ -450,7 +476,12 @@ def main() -> None:
                 'val_r2': val_r2,
                 'val_out_of_bounds': val_out_of_bounds,
                 'learning_rate': current_lr
-            })
+            }
+            # v3.1: Añadir RMSE por categoría al log para diagnóstico outliers
+            for cat in CATEGORY_LABELS:
+                history_entry[f'rmse_{cat.lower()}'] = val_rmse_by_cat[cat]
+            
+            history.append(history_entry)
             pd.DataFrame(history).to_csv(str(LOG_FILE), index=False)
             
             # Early Stopping: Mejor modelo encontrado?
@@ -515,7 +546,7 @@ def main() -> None:
     )
     
     # Evaluar en test set
-    test_rmse, test_mae, test_r2, y_true, y_pred, test_out_of_bounds = validate(
+    test_rmse, test_mae, test_r2, y_true, y_pred, test_out_of_bounds, test_rmse_by_cat = validate(
         model, test_loader, criterion
     )
     
@@ -525,6 +556,11 @@ def main() -> None:
     print(f"   MAE:  {test_mae:.4f}%  (Diagnóstico)")
     print(f"   R²:   {test_r2:.4f}     (Diagnóstico)")
     print(f"   Out-of-bounds: {test_out_of_bounds:.2f}%")
+    
+    # v3.1: Reportar RMSE por categoría en test set
+    print(f"\n📋 RMSE POR CATEGORÍA (Test Set):")
+    for cat in CATEGORY_LABELS:
+        print(f"   {cat:12s}: {test_rmse_by_cat[cat]:.4f}%")
     logger.info(
         f"Test Results - RMSE: {test_rmse:.4f}, MAE: {test_mae:.4f}, R²: {test_r2:.4f}"
     )

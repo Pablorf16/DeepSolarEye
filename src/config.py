@@ -1,5 +1,5 @@
 ﻿"""
-config.py - Configuración centralizada para DeepSolarEye v3.0
+config.py - Configuración centralizada para DeepSolarEye v3.1
 
 Single source of truth para todos los parámetros del proyecto.
 Esto facilita:
@@ -52,7 +52,7 @@ Categoría 5: Crítico (60-100%)
 """
 
 # ============================================================
-# HYPERPARÁMETROS DE ENTRENAMIENTO v3.0
+# HYPERPARÁMETROS DE ENTRENAMIENTO v3.1
 # ============================================================
 
 # Reproducibilidad: SEED FIJO para resultados determinísticos
@@ -72,13 +72,11 @@ BATCH_SIZE = 32
 
 # Learning rate inicial para optimizador Adam
 # Rango típico para regresión: [0.0001, 0.01]
-# 0.001 = valor conservador, seguro en regresión
+# CAMBIO v3.1: Reducido de 0.001 a 0.0003 para evitar overshooting
+# Evidencia: Picos de RMSE en épocas 4 y 9 con LR=0.001 indicaron
+# volatilidad excesiva. LR=0.0003 garantiza descenso más suave.
 # ReduceLROnPlateau reducirá aún más si val_rmse no mejora
-# Validación: Monitorear train/val loss primeras 10 épocas
-# - Si loss baja bien: 0.001 es correcto
-# - Si loss sube: reducir a 0.0005 o 0.0001
-# - Si baja demasiado lento: aumentar a 0.002-0.005
-LEARNING_RATE = 0.001
+LEARNING_RATE = 0.0003
 
 # Máximo de épocas permitidas
 # Con early stopping (PATIENCE=12), raramente se alcanza MAX_EPOCHS
@@ -99,9 +97,16 @@ ES_PATIENCE = 12
 # ReduceLROnPlateau: Paciencia antes de reducir learning rate
 # Debe ser MENOR que ES_PATIENCE para que scheduler actúe primero
 # Patrón: Scheduler reduce LR → modelo se recupera → ES lo ve
-# Si val_rmse no mejora durante 5 épocas → LR *= 0.1
+# Si val_rmse no mejora durante 5 épocas → LR *= SCHEDULER_FACTOR
 SCHEDULER_PATIENCE = 5
-SCHEDULER_FACTOR = 0.1  # Factor de reducción: LR_nuevo = LR_actual * factor
+
+# CAMBIO v3.1: Factor reducido de 0.1 a 0.5
+# Justificación: Con LR inicial más bajo (0.0003), reducir 90% de golpe
+# lleva demasiado rápido a LR casi nulo. Factor=0.5 permite:
+#   1. Más oportunidades de escape de mínimos locales
+#   2. Reducción gradual coherente con LR conservador
+# Referencia: Smith (2017) "Cyclical Learning Rates"
+SCHEDULER_FACTOR = 0.5  # Factor de reducción: LR_nuevo = LR_actual * factor
 
 # Dispositivo de computación (GPU si disponible, CPU en caso contrario)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -241,15 +246,15 @@ LOG_LEVEL = 'INFO'  # Niveles: DEBUG, INFO, WARNING, ERROR, CRITICAL
 
 # Nombre del archivo de historial de training
 # Contiene: epoch, train_rmse, val_rmse, val_mae, val_r2, learning_rate
-TRAINING_LOG_NAME = 'training_log_v3.csv'
+TRAINING_LOG_NAME = 'training_log_v3.1.csv'
 
 # Nombre del archivo de checkpoint (para reanudar entrenamiento)
 # Contiene: model_state_dict, optimizer_state_dict, best_val_rmse, epoch
-CHECKPOINT_NAME = 'checkpoint_v3.pth'
+CHECKPOINT_NAME = 'checkpoint_v3.1.pth'
 
 # Nombre del archivo del mejor modelo encontrado
 # Se guarda cuando: val_rmse < best_val_rmse
-BEST_MODEL_NAME = 'best_model_v3.pth'
+BEST_MODEL_NAME = 'best_model_v3.1.pth'
 
 # ============================================================
 # CONFIGURACIÓN DE IMAGEN

@@ -1,5 +1,5 @@
 ﻿"""
-model.py - Arquitectura CNN de DeepSolarEye v3.0
+model.py - Arquitectura CNN de DeepSolarEye v3.1
 
 Versión mejorada de ImpactNet para predicción de soiling en paneles solares.
 Input: Imágenes RGB (224×224)
@@ -53,6 +53,14 @@ class Net(nn.Module):
             kernel_size=7,
             padding=3
         )
+        
+        # BatchNorm después de conv1 (añadido en v3.1)
+        # Justificación: Ioffe & Szegedy (2015) demuestran que BN:
+        #   1. Reduce Internal Covariate Shift
+        #   2. Permite LR más altos
+        #   3. Actúa como regularizador adicional
+        # Antes de v3.1, conv1 procesaba entrada sin normalización
+        self.bn1 = nn.BatchNorm2d(16)
         
         # Average pooling para reducir resolución espacial sin perder información
         # kernel 3×3 reduce aprox. a 75×75 después de conv1
@@ -187,7 +195,8 @@ class Net(nn.Module):
         """
         
         # 1. Extracción inicial de características de bajo nivel
-        x = self.conv1(x)
+        # v3.1: Añadido BatchNorm después de conv1 para normalizar antes de AU1
+        x = self.relu(self.bn1(self.conv1(x)))
         
         # 2. Analysis Units con conexiones residuales
         # Patrón residual: x = relu(proj(x) + block(proj(x)))
