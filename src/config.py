@@ -1,5 +1,5 @@
 ﻿"""
-config.py - Configuración centralizada para DeepSolarEye v3.2
+config.py - Configuración centralizada para DeepSolarEye v3.3
 
 Single source of truth para todos los parámetros del proyecto.
 Esto facilita:
@@ -52,7 +52,7 @@ Categoría 5: Crítico (60-100%)
 """
 
 # ============================================================
-# HYPERPARÁMETROS DE ENTRENAMIENTO v3.2
+# HYPERPARÁMETROS DE ENTRENAMIENTO v3.3
 # ============================================================
 
 # Reproducibilidad: SEED FIJO para resultados determinísticos
@@ -72,49 +72,50 @@ BATCH_SIZE = 32
 
 # Learning rate inicial para optimizador Adam
 # Rango típico para regresión: [0.0001, 0.01]
-# CAMBIO v3.1: Reducido de 0.001 a 0.0003 para evitar overshooting
-# Evidencia: Picos de RMSE en épocas 4 y 9 con LR=0.001 indicaron
-# volatilidad excesiva. LR=0.0003 garantiza descenso más suave.
+#
+# Historial de cambios:
+#   v3.0: LR=0.001  → volatilidad excesiva (picos épocas 4, 9)
+#   v3.1: LR=0.0003 → mejoró, pero warmup no evitó pico (ép.1: 20.04)
+#   v3.2: LR=0.0003 + warmup 3 ép. → pico desplazado a ép.3 (17.15)
+#   v3.3: LR=0.0001 → conservador, sin warmup necesario.
+#         Con inyección directa (sin BN1d), no hay inestabilidad.
 # ReduceLROnPlateau reducirá aún más si val_rmse no mejora
-LEARNING_RATE = 0.0003
+LEARNING_RATE = 0.0001
 
 # Máximo de épocas permitidas
-# CAMBIO v3.2: Aumentado de 50 a 100.
-# Evidencia v3.1: Early stopping NO se activó en 50 épocas porque
-# ReduceLROnPlateau (factor=0.5) redujo LR 2 veces, dando al modelo
-# nueva capacidad de mejora cada vez. Con factor=0.5, el scheduler puede
-# reducir ~4-5 veces antes de llegar a LR irrelevante:
-#   0.0003 → 0.00015 → 7.5e-5 → 3.75e-5 → 1.88e-5
-# 100 épocas da margen suficiente para que ES se active naturalmente.
-MAX_EPOCHS = 100
+# CAMBIO v3.3: Aumentado de 100 a 150.
+# Con LR=0.0001 (más bajo), el modelo converge más lento.
+# ReduceLROnPlateau (factor=0.5) puede reducir ~5 veces:
+#   0.0001 → 5e-5 → 2.5e-5 → 1.25e-5 → 6.25e-6
+# Cada reducción necesita ~7 épocas de paciencia + exploración.
+# 150 épocas da margen holgado para convergencia + ES natural.
+# GTX 1650: ~3 min/época → 150 épocas ≈ 7.5h (asumible).
+MAX_EPOCHS = 150
 
-# Warmup lineal: épocas con LR reducido para estabilizar BatchNorm
-# NUEVO v3.2: Resuelve el pico de época 1 (val RMSE 20.04 en v3.1)
-# Causa: BatchNorm tiene running_mean=0, running_var=1 al inicio,
-# lo que produce activaciones ruidosas (Ioffe & Szegedy, 2015).
-# Solución: LR lineal desde LR/WARMUP_EPOCHS hasta LR completo.
-# Referencia: Goyal et al. (2017) "Accurate, Large Minibatch SGD"
-#   Época 1: LR = 0.0003 * (1/3) = 0.0001
-#   Época 2: LR = 0.0003 * (2/3) = 0.0002
-#   Época 3: LR = 0.0003 * (3/3) = 0.0003 (completo)
-#   Época 4+: ReduceLROnPlateau toma el control
-WARMUP_EPOCHS = 3
+# Warmup lineal: DESACTIVADO en v3.3
+# HISTORIAL:
+#   v3.2: Warmup 3 épocas para estabilizar BN1d de rama MLP.
+#   v3.3: Rama MLP eliminada → BN1d ya no existe → warmup innecesario.
+#         Además, LR=0.0001 es suficientemente bajo para un arranque
+#         estable sin calentamiento progresivo.
+WARMUP_EPOCHS = 0
 
 # ----- Early Stopping y Scheduler -----------
 
 # Early Stopping: Paciencia (épocas sin mejora antes de detener)
-# AUMENTADO a 12 porque:
-#   1. Oversampling expande dataset → más épocas para converger
-#   2. Data augmentation añade variabilidad → gradientes más ruidosos
-#   3. ReduceLROnPlateau reduce LR gradualmente → permite recuperación
-# Configuración anterior (v2): PATIENCE=7
-ES_PATIENCE = 12
+# CAMBIO v3.3: Aumentado de 12 a 15.
+# Justificación: Con LR=0.0001 (más bajo), el modelo mejora más
+# lentamente. 15 épocas da margen suficiente para que el scheduler
+# reduzca LR y el modelo tenga oportunidad de recuperarse.
+# Historial: v2=7, v3.0-v3.2=12, v3.3=15
+ES_PATIENCE = 15
 
 # ReduceLROnPlateau: Paciencia antes de reducir learning rate
 # Debe ser MENOR que ES_PATIENCE para que scheduler actúe primero
+# CAMBIO v3.3: Aumentado de 5 a 7 (coherente con LR bajo).
+# Con LR=0.0001, cada plateau necesita más épocas para saturar.
 # Patrón: Scheduler reduce LR → modelo se recupera → ES lo ve
-# Si val_rmse no mejora durante 5 épocas → LR *= SCHEDULER_FACTOR
-SCHEDULER_PATIENCE = 5
+SCHEDULER_PATIENCE = 7
 
 # CAMBIO v3.1: Factor reducido de 0.1 a 0.5
 # Justificación: Con LR inicial más bajo (0.0003), reducir 90% de golpe
@@ -263,15 +264,15 @@ LOG_LEVEL = 'INFO'  # Niveles: DEBUG, INFO, WARNING, ERROR, CRITICAL
 # Nombre del archivo de historial de training
 # Contiene: epoch, train_rmse, val_rmse, val_mae, val_r2, learning_rate,
 #           rmse por categoría (v3.1+)
-TRAINING_LOG_NAME = 'training_log_v3.csv'
+TRAINING_LOG_NAME = 'training_log_v3.3.csv'
 
 # Nombre del archivo de checkpoint (para reanudar entrenamiento)
 # Contiene: model_state_dict, optimizer_state_dict, best_val_rmse, epoch
-CHECKPOINT_NAME = 'checkpoint_v3.pth'
+CHECKPOINT_NAME = 'checkpoint_v3.3.pth'
 
 # Nombre del archivo del mejor modelo encontrado
 # Se guarda cuando: val_rmse < best_val_rmse
-BEST_MODEL_NAME = 'best_model_v3.pth'
+BEST_MODEL_NAME = 'best_model_v3.3.pth'
 
 # ============================================================
 # CONFIGURACIÓN DE IMAGEN
@@ -304,12 +305,9 @@ OUT_OF_BOUNDS_MIN = 0     # Power loss mínimo: 0% (panel perfecto)
 OUT_OF_BOUNDS_MAX = 100   # Power loss máximo: 100% (panel sin función)
 
 # ============================================================
-# FEATURES AMBIENTALES (v3.2 - Multi-modal)
+# FEATURES AMBIENTALES (v3.3 - Inyección Directa)
 # ============================================================
 
-# CAMBIO v3.2: El modelo ahora acepta features ambientales además de imagen.
-# Arquitectura multi-modal inspirada en ImpactNet original.
-#
 # ANÁLISIS DE VIABILIDAD (datos reales del dataset):
 # ─────────────────────────────────────────────────
 # Todos los datos son de Junio 2017 (un solo mes).
@@ -322,20 +320,25 @@ OUT_OF_BOUNDS_MAX = 100   # Power loss máximo: 100% (panel sin función)
 # Month/Year       N/A              ❌ EXCLUIR  Constantes (Jun 2017)
 #
 # La irradiance ya está normalizada en [0.003, 1.006] en el dataset.
+#
+# EVOLUCIÓN DE LA RAMA AMBIENTAL:
+# ──────────────────────────────
+# v3.2: Rama MLP dedicada (1→32→64) + fusión (160→96)
+#       Resultado: Overfitting (train_rmse < val_rmse), 17,664 params extra
+#       Diagnóstico: MLP sobredimensionado para 1 feature con corr=0.10
+#                    BN1d sobre 1 feature causó gap artificial train/val
+#
+# v3.3: Inyección directa (concat irradiance cruda al vector CNN)
+#       Solo 1 parámetro extra (peso de irradiance en fc_final)
+#       Sin BN1d, sin capas intermedias, sin fuente de overfitting
+#       Justificación: Con corr=0.10, basta un bias condicional lineal
 
-# Número de features ambientales de entrada al MLP
+# Número de features ambientales inyectadas directamente
 NUM_ENV_FEATURES = 1  # Solo irradiance
 
-# Dimensiones del MLP ambiental (rama Fully Connected)
-ENV_FC1_OUT = 32   # Primera capa: 1 → 32
-ENV_FC2_OUT = 64   # Segunda capa: 32 → 64
-
-# Dimensión de fusión: image_features (96) + env_features (64) → fusion
-FUSION_INPUT = 96 + ENV_FC2_OUT   # 160
-FUSION_OUTPUT = 96                # Misma dimensión que FC path original
-
 # Gradient Clipping: limita norma del gradiente para estabilidad
-# Previene explosión de gradientes en la rama MLP ambiental
+# Evidencia v3.1: spike época 28 (RMSE +2.51 en una época)
+# Referencia: Pascanu, Mikolov & Bengio (2013)
 GRAD_CLIP_MAX_NORM = 1.0
 
 

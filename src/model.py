@@ -1,5 +1,5 @@
 ﻿"""
-model.py - Arquitectura CNN Multi-modal de DeepSolarEye v3.2
+model.py - Arquitectura CNN con inyección directa de DeepSolarEye v3.3
 
 Versión mejorada de ImpactNet para predicción de soiling en paneles solares.
 Input: Imágenes RGB (224×224) + Features ambientales (irradiance)
@@ -10,38 +10,43 @@ import torch
 import torch.nn as nn
 
 # Importar configuración de features ambientales
-from src.config import (
-    ENV_FC1_OUT,
-    ENV_FC2_OUT,
-    FUSION_INPUT,
-    FUSION_OUTPUT,
-    NUM_ENV_FEATURES,
-)
+from src.config import NUM_ENV_FEATURES
 
 
 class Net(nn.Module):
     """
-    Red neuronal convolucional multi-modal basada en ImpactNet.
+    Red neuronal convolucional con inyección directa basada en ImpactNet.
     
     CAMBIO CRÍTICO EN v3.0: Se removió sigmoid de la salida.
-    CAMBIO v3.2: Arquitectura multi-modal (image + env features).
+    CAMBIO v3.2: Rama MLP ambiental (1→32→64) + fusión (160→96).
+    CAMBIO v3.3: Eliminada rama MLP. Inyección directa de irradiance.
     
-    Justificación v3.0:
+    Justificación v3.0 (regresión abierta):
     - En regresión, la salida debe ser LIBRE (sin restricciones [0,100]).
     - Si el modelo predice -50 o 150, es información diagnóstica valiosa.
-    - Límites artificiales con sigmoid OCULTAN problemas de aprendizaje.
     - El post-procesing (clipping) es responsabilidad de la aplicación.
     
-    Justificación v3.2 (multi-modal):
-    - Inspirado en ImpactNet original que usa features ambientales.
-    - La irradiance tiene correlación física con el soiling.
-    - Rama MLP dedicada: Linear(1→32)→ReLU→Linear(32→64)→ReLU
-    - Fusión tardía (late fusion): concat(image_96, env_64) → Linear(160,96)
+    Justificación v3.3 (inyección directa):
+    - v3.2 con MLP(1→32→64) causó regresión: RMSE 9.62 vs 8.73 (v3.1).
+    - Diagnóstico: 17,664 params extra para 1 feature (corr=0.10) → overfitting.
+    - BN1d sobre 1 feature con batch=32 creó gap artificial train/val.
+    - Solución: concat(cnn_96, irradiance_1) → Linear(97→1).
+    - 1 parámetro extra vs 17,664 → mínimo riesgo de overfitting.
     
-    Arquitectura:
+    Comparación de parámetros (rama ambiental):
+    ┌──────────────┬────────────────────────────┬────────────┐
+    │ Versión      │ Arquitectura               │ Params     │
+    ├──────────────┼────────────────────────────┼────────────┤
+    │ v3.1         │ Solo imagen                │ 0          │
+    │ v3.2 (MLP)   │ 1→32→64 + fusión 160→96   │ 17,664     │
+    │ v3.3 (direct)│ concat + Linear(97→1)      │ 1*         │
+    └──────────────┴────────────────────────────┴────────────┘
+    * 1 peso extra en fc_final (97 vs 96 entradas)
+    
+    Arquitectura v3.3:
     - Rama visual: Conv2d(3→16, 7×7) + 5 AU + FC → 96 features
-    - Rama ambiental: MLP(1→32→64) → 64 features
-    - Fusión: concat → Linear(160→96) → 96 → 1
+    - Inyección:   concat(visual_96, irradiance_1) → 97 features
+    - Salida:      Linear(97→1) → regresión abierta
     
     Input shape: [B, 3, 224, 224] + [B, 1] donde B = batch size
     Output shape: [B] predicciones de pérdida de potencia (%)
@@ -161,39 +166,22 @@ class Net(nn.Module):
         self.fc0 = nn.Linear(96, 96)
         
         # ============================================================
-        # RAMA AMBIENTAL - MLP (v3.2)
+        # CAPA DE SALIDA CON INYECCIÓN DIRECTA (v3.3)
         # ============================================================
-        # Procesa features ambientales (irradiance) en paralelo a la CNN.
-        # Inspirado en ImpactNet original: forward(au, ef)
-        # Dimensiones: 1 → 32 → 64 (configurables en config.py)
-        self.env_fc1 = nn.Linear(NUM_ENV_FEATURES, ENV_FC1_OUT)
-        self.env_bn1 = nn.BatchNorm1d(ENV_FC1_OUT)
-        self.env_fc2 = nn.Linear(ENV_FC1_OUT, ENV_FC2_OUT)
-        self.env_bn2 = nn.BatchNorm1d(ENV_FC2_OUT)
-
-        # ============================================================
-        # CAPA DE FUSIÓN (v3.2)
-        # ============================================================
-        # Late fusion: concatena features visuales (96) + ambientales (64)
-        # y las proyecta de vuelta a 96 dimensiones para la salida
-        self.fusion = nn.Linear(FUSION_INPUT, FUSION_OUTPUT)  # 160 → 96
-
-        # ============================================================
-        # CAPA DE SALIDA (REGRESIÓN)
-        # ============================================================
-        # Final: 96 → 1 (salida única: predicción de power loss %)
+        # v3.3: Eliminada rama MLP y capa de fusión.
+        # Inyección directa: concat(visual_96, irradiance_1) → 97 → 1
+        # Solo 1 parámetro extra vs 17,664 del MLP en v3.2.
         # SIN sigmoid: permite predicciones fuera [0, 100] como diagnóstico
-        self.fc_final = nn.Linear(FUSION_OUTPUT, 1)
+        self.fc_final = nn.Linear(96 + NUM_ENV_FEATURES, 1)  # 97 → 1
 
-    def forward(self, x: torch.Tensor, env: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, env: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass de la red multi-modal.
+        Forward pass con inyección directa de irradiance.
         
         Arquitectura paso a paso:
         1. Rama visual: Convolución inicial + 5 AU + FC → 96 features
-        2. Rama ambiental: MLP(env) → 64 features
-        3. Fusión: concat(visual_96, env_64) → Linear(160, 96)
-        4. Salida: 96 → 1 (regresión abierta)
+        2. Inyección: concat(visual_96, irradiance_1) → 97 features
+        3. Salida: Linear(97→1) → regresión abierta
         
         OPTIMIZACIÓN CRÍTICA:
         Para cada AU, se calcula la proyección UNA SOLA VEZ y se guarda
@@ -261,17 +249,13 @@ class Net(nn.Module):
         x = self.relu(self.dropout(self.fu(x)))
         x = self.relu(self.dropout(self.fc0(x)))  # [B, 96]
         
-        # 6. Rama ambiental: MLP sobre features ambientales (v3.2)
-        ef = self.relu(self.env_bn1(self.env_fc1(env)))   # [B, 32]
-        ef = self.relu(self.env_bn2(self.env_fc2(ef)))    # [B, 64]
+        # 6. Inyección directa de irradiance (v3.3)
+        # Concat simple: [B, 96] + [B, 1] → [B, 97]
+        # Sin MLP intermedio: 1 param extra vs 17,664 en v3.2
+        x = torch.cat((x, env), dim=1)  # [B, 97]
         
-        # 7. Fusión tardía (late fusion): concatenación + proyección
-        # Patrón ImpactNet: torch.cat((ef, au), dim=1)
-        fused = torch.cat((x, ef), dim=1)          # [B, 160]
-        fused = self.relu(self.fusion(fused))       # [B, 96]
-        
-        # 8. Salida final - Regresión ABIERTA (sin sigmoid)
-        output = self.fc_final(fused)
+        # 7. Salida final - Regresión ABIERTA (sin sigmoid)
+        output = self.fc_final(x)  # [B, 1]
         
         return output
 

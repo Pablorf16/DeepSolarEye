@@ -1,18 +1,18 @@
 ﻿"""
-train.py - Entrenamiento de DeepSolarEye v3.2
+train.py - Entrenamiento de DeepSolarEye v3.3
 
-Implementación completa del plan de ejecución v3.2:
+Implementación completa del plan de ejecución v3.3:
   1. Sin sigmoid en salida (regresión abierta)
   2. Stratified split documentado
   3. RMSE (optimizing) + R²,MAE (diagnostic)
-  4. Early Stopping con PATIENCE=12
-  5. ReduceLROnPlateau scheduler
+  4. Early Stopping con PATIENCE=15
+  5. ReduceLROnPlateau scheduler (patience=7, factor=0.5)
   6. Oversampling + Data Augmentation (sin WeightedSampler)
-  7. Multi-modal: Imágenes + Features ambientales (irradiance)
+  7. Inyección directa de irradiance (sin rama MLP)
   8. Gradient Clipping para estabilidad
 
 Entrada: CSVs de entrenamiento, validación, test
-Salida: Mejor modelo, checkpoint, training_log_v3.csv, gráficas
+Salida: Mejor modelo, checkpoint, training_log_v3.3.csv, gráficas
 """
 
 import logging
@@ -47,7 +47,6 @@ from src.config import (
     SCHEDULER_FACTOR,
     SEED,
     TRAINING_LOG_NAME,
-    WARMUP_EPOCHS,
 )
 from src.dataset import SolarPanelDataset, get_transforms
 from src.model import Net
@@ -323,7 +322,7 @@ def main() -> None:
     # ============================================================
     
     print(f"\n{'='*60}")
-    print("🚀 INICIANDO ENTRENAMIENTO DeepSolarEye v3.2 (Multi-modal)")
+    print("🚀 INICIANDO ENTRENAMIENTO DeepSolarEye v3.3 (Inyección Directa)")
     print("="*60)
     print(f"Dispositivo:        {DEVICE}")
     print(f"SEED:               {SEED}")
@@ -331,8 +330,8 @@ def main() -> None:
     print(f"Batch Size:         {BATCH_SIZE}")
     print(f"ES Patience:        {ES_PATIENCE}")
     print(f"Scheduler Patience: {SCHEDULER_PATIENCE}")
+    print(f"Scheduler Factor:   {SCHEDULER_FACTOR}")
     print(f"Gradient Clipping:  {GRAD_CLIP_MAX_NORM}")
-    print(f"LR Warmup:          {WARMUP_EPOCHS} épocas")
     print(f"MAX Epochs:         {MAX_EPOCHS}")
     print("="*60 + "\n")
     
@@ -378,7 +377,7 @@ def main() -> None:
     
     # Crear DataLoaders (sin WeightedRandomSampler, usamos shuffle normal)
     # drop_last=True: Evita batches de tamaño 1 que causan error en
-    # BatchNorm1d de la rama MLP ambiental (v3.2)
+    # BatchNorm2d de los Analysis Units de la CNN
     train_loader = DataLoader(
         train_ds,
         batch_size=BATCH_SIZE,
@@ -484,22 +483,12 @@ def main() -> None:
             )
             print(f"   📋 RMSE/Cat: {rmse_cat_str}")
             
-            # Learning rate: warmup lineal o ReduceLROnPlateau
-            if epoch < WARMUP_EPOCHS:
-                # Warmup lineal (Goyal et al., 2017): LR sube gradualmente
-                # Permite que BatchNorm estabilice running stats antes de
-                # aplicar LR completo. Evita pico de época 1 observado en v3.1.
-                warmup_lr = LEARNING_RATE * (epoch + 1) / WARMUP_EPOCHS
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = warmup_lr
-                current_lr = warmup_lr
-                print(f"   🔥 Warmup LR: {current_lr:.6f} "
-                      f"(época {epoch + 1}/{WARMUP_EPOCHS})")
-            else:
-                # Post-warmup: ReduceLROnPlateau toma el control
-                scheduler.step(val_rmse)
-                current_lr = optimizer.param_groups[0]['lr']
-                print(f"   📈 Learning Rate: {current_lr:.6f}")
+            # ReduceLROnPlateau: reduce LR si val_rmse no mejora
+            # v3.3: Sin warmup. LR=0.0001 es suficientemente bajo
+            # para arranque estable (sin BN1d que desestabilice).
+            scheduler.step(val_rmse)
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f"   📈 Learning Rate: {current_lr:.6f}")
             
             # Guardar historial en CSV
             history_entry = {
