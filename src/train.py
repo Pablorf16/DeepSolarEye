@@ -1,13 +1,15 @@
 ﻿"""
-train.py - Entrenamiento de DeepSolarEye v3.1
+train.py - Entrenamiento de DeepSolarEye v3.2
 
-Implementación completa del plan de ejecución v3.1:
+Implementación completa del plan de ejecución v3.2:
   1. Sin sigmoid en salida (regresión abierta)
   2. Stratified split documentado
   3. RMSE (optimizing) + R²,MAE (diagnostic)
   4. Early Stopping con PATIENCE=12
   5. ReduceLROnPlateau scheduler
   6. Oversampling + Data Augmentation (sin WeightedSampler)
+  7. Multi-modal: Imágenes + Features ambientales (irradiance)
+  8. Gradient Clipping para estabilidad
 
 Entrada: CSVs de entrenamiento, validación, test
 Salida: Mejor modelo, checkpoint, training_log_v3.csv, gráficas
@@ -38,12 +40,14 @@ from src.config import (
     CATEGORY_LABELS,
     CHECKPOINT_NAME,
     ES_PATIENCE,
+    GRAD_CLIP_MAX_NORM,
     LEARNING_RATE,
     MAX_EPOCHS,
     SCHEDULER_PATIENCE,
     SCHEDULER_FACTOR,
     SEED,
     TRAINING_LOG_NAME,
+    WARMUP_EPOCHS,
 )
 from src.dataset import SolarPanelDataset, get_transforms
 from src.model import Net
@@ -64,7 +68,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# CONFIGURACIÓN v3.1
+# CONFIGURACIÓN v3.2
 # ============================================================
 
 # Reproducibilidad: SEED fijo (importado de config.py)
@@ -104,6 +108,9 @@ def train_one_epoch(
     
     Calcula MSE promedio y retorna como RMSE para consistencia con validate().
     
+    CAMBIO v3.2: Recibe 3-tupla (image, label, env) del DataLoader y
+    aplica gradient clipping para estabilidad de la rama MLP.
+    
     Args:
         model (nn.Module): Red neuronal en modo entrenamiento
         loader (DataLoader): Cargador de datos de entrenamiento
@@ -117,6 +124,7 @@ def train_one_epoch(
         - Barra de progreso con tqdm
         - Cálculo incremental de RMSE
         - Movimiento de tensores a dispositivo
+        - Gradient clipping (v3.2)
     """
     model.train()
     total_mse = 0.0
@@ -124,18 +132,23 @@ def train_one_epoch(
     
     # Barra de progreso durante época
     loop = tqdm(loader, desc="Training", leave=False)
-    for images, labels in loop:
+    for images, labels, env in loop:
         # Mover datos a dispositivo (GPU o CPU)
         images = images.to(DEVICE)
         labels = labels.to(DEVICE).float()
+        env = env.to(DEVICE)
         
-        # Forward pass
+        # Forward pass (v3.2: pasar env features al modelo)
         optimizer.zero_grad()
-        outputs = model(images)
+        outputs = model(images, env)
         
         # Backward pass
         loss = criterion(outputs.squeeze(dim=1), labels)  # MSE
         loss.backward()
+        
+        # Gradient Clipping (v3.2): limita norma para estabilidad MLP
+        torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_MAX_NORM)
+        
         optimizer.step()
         
         # Acumular métrica
@@ -164,6 +177,8 @@ def validate(
     - Out-of-bounds: Indicador de problemas
     - RMSE por categoría: Diagnóstico de outliers (v3.1)
     
+    CAMBIO v3.2: Recibe 3-tupla y pasa env features al modelo.
+    
     Args:
         model (nn.Module): Red neuronal en modo evaluación
         loader (DataLoader): Cargador de datos de validación/test
@@ -188,12 +203,13 @@ def validate(
     
     # Evaluación sin cálculo de gradientes (más rápido)
     with torch.no_grad():
-        for images, labels in loader:
+        for images, labels, env in loader:
             images = images.to(DEVICE)
             labels = labels.to(DEVICE).float()
+            env = env.to(DEVICE)
             
-            # Forward pass
-            outputs = model(images)
+            # Forward pass (v3.2: pasar env features al modelo)
+            outputs = model(images, env)
             loss = criterion(outputs.squeeze(dim=1), labels)
             
             # Acumular MSE
@@ -307,7 +323,7 @@ def main() -> None:
     # ============================================================
     
     print(f"\n{'='*60}")
-    print("🚀 INICIANDO ENTRENAMIENTO DeepSolarEye v3.1")
+    print("🚀 INICIANDO ENTRENAMIENTO DeepSolarEye v3.2 (Multi-modal)")
     print("="*60)
     print(f"Dispositivo:        {DEVICE}")
     print(f"SEED:               {SEED}")
@@ -315,6 +331,9 @@ def main() -> None:
     print(f"Batch Size:         {BATCH_SIZE}")
     print(f"ES Patience:        {ES_PATIENCE}")
     print(f"Scheduler Patience: {SCHEDULER_PATIENCE}")
+    print(f"Gradient Clipping:  {GRAD_CLIP_MAX_NORM}")
+    print(f"LR Warmup:          {WARMUP_EPOCHS} épocas")
+    print(f"MAX Epochs:         {MAX_EPOCHS}")
     print("="*60 + "\n")
     
     # Crear directorios de salida
@@ -358,11 +377,14 @@ def main() -> None:
         raise
     
     # Crear DataLoaders (sin WeightedRandomSampler, usamos shuffle normal)
+    # drop_last=True: Evita batches de tamaño 1 que causan error en
+    # BatchNorm1d de la rama MLP ambiental (v3.2)
     train_loader = DataLoader(
         train_ds,
         batch_size=BATCH_SIZE,
         shuffle=True,
-        num_workers=0
+        num_workers=0,
+        drop_last=True,
     )
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
     test_loader = DataLoader(
@@ -462,10 +484,22 @@ def main() -> None:
             )
             print(f"   📋 RMSE/Cat: {rmse_cat_str}")
             
-            # Learning rate scheduler step
-            scheduler.step(val_rmse)
-            current_lr = optimizer.param_groups[0]['lr']
-            print(f"   📈 Learning Rate: {current_lr:.6f}")
+            # Learning rate: warmup lineal o ReduceLROnPlateau
+            if epoch < WARMUP_EPOCHS:
+                # Warmup lineal (Goyal et al., 2017): LR sube gradualmente
+                # Permite que BatchNorm estabilice running stats antes de
+                # aplicar LR completo. Evita pico de época 1 observado en v3.1.
+                warmup_lr = LEARNING_RATE * (epoch + 1) / WARMUP_EPOCHS
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = warmup_lr
+                current_lr = warmup_lr
+                print(f"   🔥 Warmup LR: {current_lr:.6f} "
+                      f"(época {epoch + 1}/{WARMUP_EPOCHS})")
+            else:
+                # Post-warmup: ReduceLROnPlateau toma el control
+                scheduler.step(val_rmse)
+                current_lr = optimizer.param_groups[0]['lr']
+                print(f"   📈 Learning Rate: {current_lr:.6f}")
             
             # Guardar historial en CSV
             history_entry = {

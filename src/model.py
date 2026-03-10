@@ -1,33 +1,49 @@
 ﻿"""
-model.py - Arquitectura CNN de DeepSolarEye v3.1
+model.py - Arquitectura CNN Multi-modal de DeepSolarEye v3.2
 
 Versión mejorada de ImpactNet para predicción de soiling en paneles solares.
-Input: Imágenes RGB (224×224)
+Input: Imágenes RGB (224×224) + Features ambientales (irradiance)
 Output: Pérdida de potencia (regresión abierta, sin sigmoid)
 """
 
 import torch
 import torch.nn as nn
 
+# Importar configuración de features ambientales
+from src.config import (
+    ENV_FC1_OUT,
+    ENV_FC2_OUT,
+    FUSION_INPUT,
+    FUSION_OUTPUT,
+    NUM_ENV_FEATURES,
+)
+
 
 class Net(nn.Module):
     """
-    Red neuronal convolucional personalizada basada en ImpactNet.
+    Red neuronal convolucional multi-modal basada en ImpactNet.
     
     CAMBIO CRÍTICO EN v3.0: Se removió sigmoid de la salida.
+    CAMBIO v3.2: Arquitectura multi-modal (image + env features).
     
-    Justificación:
+    Justificación v3.0:
     - En regresión, la salida debe ser LIBRE (sin restricciones [0,100]).
     - Si el modelo predice -50 o 150, es información diagnóstica valiosa.
     - Límites artificiales con sigmoid OCULTAN problemas de aprendizaje.
     - El post-procesing (clipping) es responsabilidad de la aplicación.
     
-    Arquitectura:
-    - Capa inicial: Conv2d(3→16, kernel 7×7) + AvgPool + Dropout
-    - 5 Analysis Units (AU1-AU5): Bloques residuales con Conv5×5
-    - Fully Connected: 384→96→96→1 (salida en regresión abierta)
+    Justificación v3.2 (multi-modal):
+    - Inspirado en ImpactNet original que usa features ambientales.
+    - La irradiance tiene correlación física con el soiling.
+    - Rama MLP dedicada: Linear(1→32)→ReLU→Linear(32→64)→ReLU
+    - Fusión tardía (late fusion): concat(image_96, env_64) → Linear(160,96)
     
-    Input shape: [B, 3, 224, 224] donde B = batch size
+    Arquitectura:
+    - Rama visual: Conv2d(3→16, 7×7) + 5 AU + FC → 96 features
+    - Rama ambiental: MLP(1→32→64) → 64 features
+    - Fusión: concat → Linear(160→96) → 96 → 1
+    
+    Input shape: [B, 3, 224, 224] + [B, 1] donde B = batch size
     Output shape: [B] predicciones de pérdida de potencia (%)
     """
     
@@ -145,40 +161,51 @@ class Net(nn.Module):
         self.fc0 = nn.Linear(96, 96)
         
         # ============================================================
+        # RAMA AMBIENTAL - MLP (v3.2)
+        # ============================================================
+        # Procesa features ambientales (irradiance) en paralelo a la CNN.
+        # Inspirado en ImpactNet original: forward(au, ef)
+        # Dimensiones: 1 → 32 → 64 (configurables en config.py)
+        self.env_fc1 = nn.Linear(NUM_ENV_FEATURES, ENV_FC1_OUT)
+        self.env_bn1 = nn.BatchNorm1d(ENV_FC1_OUT)
+        self.env_fc2 = nn.Linear(ENV_FC1_OUT, ENV_FC2_OUT)
+        self.env_bn2 = nn.BatchNorm1d(ENV_FC2_OUT)
+
+        # ============================================================
+        # CAPA DE FUSIÓN (v3.2)
+        # ============================================================
+        # Late fusion: concatena features visuales (96) + ambientales (64)
+        # y las proyecta de vuelta a 96 dimensiones para la salida
+        self.fusion = nn.Linear(FUSION_INPUT, FUSION_OUTPUT)  # 160 → 96
+
+        # ============================================================
         # CAPA DE SALIDA (REGRESIÓN)
         # ============================================================
         # Final: 96 → 1 (salida única: predicción de power loss %)
         # SIN sigmoid: permite predicciones fuera [0, 100] como diagnóstico
-        self.fc_final = nn.Linear(96, 1)
+        self.fc_final = nn.Linear(FUSION_OUTPUT, 1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, env: torch.Tensor = None) -> torch.Tensor:
         """
-        Forward pass de la red.
+        Forward pass de la red multi-modal.
         
         Arquitectura paso a paso:
-        1. Convolución inicial + pooling global
-        2. 5 Analysis Units con conexiones residuales (optimizadas)
-        3. Pooling final y aplanado
-        4. Capas FC con dropout para regularización
-        5. Salida sin restricciones (regresión abierta)
+        1. Rama visual: Convolución inicial + 5 AU + FC → 96 features
+        2. Rama ambiental: MLP(env) → 64 features
+        3. Fusión: concat(visual_96, env_64) → Linear(160, 96)
+        4. Salida: 96 → 1 (regresión abierta)
         
         OPTIMIZACIÓN CRÍTICA:
         Para cada AU, se calcula la proyección UNA SOLA VEZ y se guarda
         en una variable temporal. Esto evita cómputo duplicado.
         
-        Antes (ineficiente):
-            x = self.relu(self.rcu1_conv(x) + self.rcu1(self.rcu1_conv(x)))
-            # self.rcu1_conv(x) se ejecuta dos veces ❌
-        
-        Después (eficiente):
-            proj = self.rcu1_conv(x)
-            x = self.relu(proj + self.rcu1(proj))
-            # self.rcu1_conv(x) se ejecuta una sola vez ✓
-        
         Args:
             x (torch.Tensor): Batch de imágenes RGB normalizadas.
                              Shape: [B, 3, 224, 224]
                              Valores esperados: μ=0, σ=1 (ImageNet norm)
+            env (torch.Tensor): Features ambientales (irradiance).
+                               Shape: [B, NUM_ENV_FEATURES]
+                               Valores esperados: [0, 1]
         
         Returns:
             torch.Tensor: Predicciones de pérdida de potencia.
@@ -188,10 +215,11 @@ class Net(nn.Module):
         
         Example:
             >>> model = Net()
-            >>> x = torch.randn(32, 3, 224, 224)  # batch de 32
-            >>> y = model(x)  # shape: [32]
-            >>> print(y.shape, y.min().item(), y.max().item())
-            torch.Size([32]) -5.234 105.872
+            >>> x = torch.randn(32, 3, 224, 224)
+            >>> env = torch.rand(32, 1)
+            >>> y = model(x, env)
+            >>> print(y.shape)
+            torch.Size([32, 1])
         """
         
         # 1. Extracción inicial de características de bajo nivel
@@ -229,15 +257,21 @@ class Net(nn.Module):
         # Ejemplo: [32, 96, 2, 2] → [32, 384]
         x = x.view(x.shape[0], -1)
         
-        # 5. Capas totalmente conectadas con regularización
+        # 5. Capas totalmente conectadas con regularización (rama visual)
         x = self.relu(self.dropout(self.fu(x)))
-        x = self.relu(self.dropout(self.fc0(x)))
+        x = self.relu(self.dropout(self.fc0(x)))  # [B, 96]
         
-        # 6. Salida final - Regresión ABIERTA (sin sigmoid)
-        # Interpretación:
-        # - ~[0, 100]: predicciones en rango físicamente esperado
-        # - <0 o >100: diagnóstico de problemas de aprendizaje
-        output = self.fc_final(x)  # Retorna [B, 1], train.py hace squeeze(dim=1)
+        # 6. Rama ambiental: MLP sobre features ambientales (v3.2)
+        ef = self.relu(self.env_bn1(self.env_fc1(env)))   # [B, 32]
+        ef = self.relu(self.env_bn2(self.env_fc2(ef)))    # [B, 64]
+        
+        # 7. Fusión tardía (late fusion): concatenación + proyección
+        # Patrón ImpactNet: torch.cat((ef, au), dim=1)
+        fused = torch.cat((x, ef), dim=1)          # [B, 160]
+        fused = self.relu(self.fusion(fused))       # [B, 96]
+        
+        # 8. Salida final - Regresión ABIERTA (sin sigmoid)
+        output = self.fc_final(fused)
         
         return output
 

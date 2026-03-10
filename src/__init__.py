@@ -1,5 +1,5 @@
 ﻿"""
-src/__init__.py - Package initialization para DeepSolarEye v3.0
+src/__init__.py - Package initialization para DeepSolarEye v3.2
 
 Hace que el directorio src/ sea un paquete Python importable,
 permitiendo:
@@ -15,7 +15,7 @@ para permitir imports ligeros. Use imports explícitos:
     from src.dataset import SolarPanelDataset  # Carga torch, PIL
 """
 
-__version__ = "3.0"
+__version__ = "3.2"
 __author__ = "DeepSolarEye Team"
 
 # Solo metadata, sin imports pesados

@@ -1,8 +1,8 @@
 ﻿"""
-dataset.py - Cargador de datos para DeepSolarEye v3.0
+dataset.py - Cargador de datos para DeepSolarEye v3.2
 
-PyTorch Dataset para cargar imágenes de paneles solares desde archivos CSV
-con transformaciones y validación robusta de rutas.
+PyTorch Dataset multi-modal para cargar imágenes de paneles solares
+junto con features ambientales (irradiance) desde archivos CSV.
 """
 
 import logging
@@ -32,12 +32,16 @@ logger = logging.getLogger(__name__)
 
 class SolarPanelDataset(Dataset):
     """
-    PyTorch Dataset agnóstico a balanceo de clases para DeepSolarEye v3.0.
+    PyTorch Dataset multi-modal para DeepSolarEye v3.2.
     
-    Carga imágenes de paneles solares desde CSV y aplica transformaciones
-    según la fase (entrenamiento, validación o test).
+    Carga imágenes de paneles solares y features ambientales (irradiance)
+    desde CSV, aplicando transformaciones según la fase.
     
-    ARQUITECTURA v3.0 - Separación de responsabilidades:
+    CAMBIO v3.2: __getitem__ retorna 3-tupla (image, label, env_features)
+    en lugar de 2-tupla. Esto permite al modelo recibir irradiance como
+    feature ambiental en su rama MLP dedicada.
+    
+    ARQUITECTURA - Separación de responsabilidades:
     - Oversampling: Realizado en data_prep.py → train_dataset.csv contiene
       filas duplicadas estratégicamente
     - Dataset: Completamente agnóstico a si está oversampleado o no
@@ -113,8 +117,8 @@ class SolarPanelDataset(Dataset):
             logger.error(f"Error leyendo CSV {csv_path}: {e}")
             raise
         
-        # Verificar columnas requeridas
-        required_cols = ['filename', 'power_loss']
+        # Verificar columnas requeridas (v3.2: incluye irradiance)
+        required_cols = ['filename', 'power_loss', 'irradiance']
         missing_cols = [col for col in required_cols if col not in self.data.columns]
         if missing_cols:
             raise KeyError(
@@ -169,17 +173,21 @@ class SolarPanelDataset(Dataset):
 
     def __getitem__(self, idx: int) -> tuple:
         """
-        Obtiene una muestra (imagen, etiqueta) por índice.
+        Obtiene una muestra (imagen, etiqueta, env_features) por índice.
+        
+        CAMBIO v3.2: Retorna 3-tupla incluyendo features ambientales.
         
         Args:
             idx (int): Índice de la muestra (0 <= idx < len(self))
         
         Returns:
-            tuple: (image, label) donde:
+            tuple: (image, label, env_features) donde:
                 - image (torch.Tensor): Imagen procesada [3, 224, 224]
                   Valores normalizados con ImageNet mean/std
                 - label (torch.Tensor): Pérdida de potencia [0-100]
                   dtype: torch.float32
+                - env_features (torch.Tensor): Features ambientales [1]
+                  Contiene irradiance normalizada [0, 1]
         
         Notes:
             Si una imagen no existe o está corrupta, retorna una imagen
@@ -191,14 +199,14 @@ class SolarPanelDataset(Dataset):
         
         Example:
             >>> dataset = SolarPanelDataset(...)
-            >>> image, label = dataset[0]
-            >>> print(image.shape, label.item())
-            torch.Size([3, 224, 224]) 12.5
+            >>> image, label, env = dataset[0]
+            >>> print(image.shape, label.item(), env.shape)
+            torch.Size([3, 224, 224]) 12.5 torch.Size([1])
         """
         
-        # 1. Obtener nombre de archivo del CSV (ruta relativa)
-        relative_filename = self.data.iloc[idx]['filename']
-        img_path = os.path.join(self.img_dir, relative_filename)
+        # 1. Obtener datos de la fila correspondiente
+        row = self.data.iloc[idx]
+        img_path = os.path.join(self.img_dir, row['filename'])
         
         # 2. Abrir imagen con manejo robusto de errores
         try:
@@ -213,16 +221,20 @@ class SolarPanelDataset(Dataset):
             image = Image.new('RGB', (IMG_SIZE, IMG_SIZE), (0, 0, 0))
 
         # 3. Leer etiqueta (Power Loss en %)
-        label = torch.tensor(
-            float(self.data.iloc[idx]['power_loss']),
-            dtype=torch.float32
+        label = torch.tensor(float(row['power_loss']), dtype=torch.float32)
+
+        # 4. Leer features ambientales (v3.2: solo irradiance)
+        # Irradiance ya está normalizada en [0.003, 1.006] en el dataset
+        env_features = torch.tensor(
+            [float(row['irradiance'])],
+            dtype=torch.float32,
         )
 
-        # 4. Aplicar transformaciones (augmentation si train, norm si test)
+        # 5. Aplicar transformaciones (augmentation si train, norm si test)
         if self.transform:
             image = self.transform(image)
 
-        return image, label
+        return image, label, env_features
 
 
 def get_transforms(phase: str = 'train') -> transforms.Compose:

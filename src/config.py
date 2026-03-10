@@ -1,5 +1,5 @@
 ﻿"""
-config.py - Configuración centralizada para DeepSolarEye v3.1
+config.py - Configuración centralizada para DeepSolarEye v3.2
 
 Single source of truth para todos los parámetros del proyecto.
 Esto facilita:
@@ -52,7 +52,7 @@ Categoría 5: Crítico (60-100%)
 """
 
 # ============================================================
-# HYPERPARÁMETROS DE ENTRENAMIENTO v3.1
+# HYPERPARÁMETROS DE ENTRENAMIENTO v3.2
 # ============================================================
 
 # Reproducibilidad: SEED FIJO para resultados determinísticos
@@ -79,10 +79,26 @@ BATCH_SIZE = 32
 LEARNING_RATE = 0.0003
 
 # Máximo de épocas permitidas
-# Con early stopping (PATIENCE=12), raramente se alcanza MAX_EPOCHS
-# Típicamente: convergencia ~20-30 épocas con oversampling
-# Aumentar a 100-200 recomendado si early stopping no se activa
-MAX_EPOCHS = 50
+# CAMBIO v3.2: Aumentado de 50 a 100.
+# Evidencia v3.1: Early stopping NO se activó en 50 épocas porque
+# ReduceLROnPlateau (factor=0.5) redujo LR 2 veces, dando al modelo
+# nueva capacidad de mejora cada vez. Con factor=0.5, el scheduler puede
+# reducir ~4-5 veces antes de llegar a LR irrelevante:
+#   0.0003 → 0.00015 → 7.5e-5 → 3.75e-5 → 1.88e-5
+# 100 épocas da margen suficiente para que ES se active naturalmente.
+MAX_EPOCHS = 100
+
+# Warmup lineal: épocas con LR reducido para estabilizar BatchNorm
+# NUEVO v3.2: Resuelve el pico de época 1 (val RMSE 20.04 en v3.1)
+# Causa: BatchNorm tiene running_mean=0, running_var=1 al inicio,
+# lo que produce activaciones ruidosas (Ioffe & Szegedy, 2015).
+# Solución: LR lineal desde LR/WARMUP_EPOCHS hasta LR completo.
+# Referencia: Goyal et al. (2017) "Accurate, Large Minibatch SGD"
+#   Época 1: LR = 0.0003 * (1/3) = 0.0001
+#   Época 2: LR = 0.0003 * (2/3) = 0.0002
+#   Época 3: LR = 0.0003 * (3/3) = 0.0003 (completo)
+#   Época 4+: ReduceLROnPlateau toma el control
+WARMUP_EPOCHS = 3
 
 # ----- Early Stopping y Scheduler -----------
 
@@ -245,16 +261,17 @@ LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 LOG_LEVEL = 'INFO'  # Niveles: DEBUG, INFO, WARNING, ERROR, CRITICAL
 
 # Nombre del archivo de historial de training
-# Contiene: epoch, train_rmse, val_rmse, val_mae, val_r2, learning_rate
-TRAINING_LOG_NAME = 'training_log_v3.1.csv'
+# Contiene: epoch, train_rmse, val_rmse, val_mae, val_r2, learning_rate,
+#           rmse por categoría (v3.1+)
+TRAINING_LOG_NAME = 'training_log_v3.csv'
 
 # Nombre del archivo de checkpoint (para reanudar entrenamiento)
 # Contiene: model_state_dict, optimizer_state_dict, best_val_rmse, epoch
-CHECKPOINT_NAME = 'checkpoint_v3.1.pth'
+CHECKPOINT_NAME = 'checkpoint_v3.pth'
 
 # Nombre del archivo del mejor modelo encontrado
 # Se guarda cuando: val_rmse < best_val_rmse
-BEST_MODEL_NAME = 'best_model_v3.1.pth'
+BEST_MODEL_NAME = 'best_model_v3.pth'
 
 # ============================================================
 # CONFIGURACIÓN DE IMAGEN
@@ -285,5 +302,40 @@ OUT_OF_BOUNDS_DIAGNOSTIC = True
 # Límites del rango físicamente válido
 OUT_OF_BOUNDS_MIN = 0     # Power loss mínimo: 0% (panel perfecto)
 OUT_OF_BOUNDS_MAX = 100   # Power loss máximo: 100% (panel sin función)
+
+# ============================================================
+# FEATURES AMBIENTALES (v3.2 - Multi-modal)
+# ============================================================
+
+# CAMBIO v3.2: El modelo ahora acepta features ambientales además de imagen.
+# Arquitectura multi-modal inspirada en ImpactNet original.
+#
+# ANÁLISIS DE VIABILIDAD (datos reales del dataset):
+# ─────────────────────────────────────────────────
+# Todos los datos son de Junio 2017 (un solo mes).
+#
+# Feature          Corr(power_loss)  Decisión    Justificación
+# ──────────────── ──────────────── ────────── ──────────────────────────
+# Irradiance       0.1027           ✅ INCLUIR  Medición física real, [0,1]
+# Hour/Min/Sec     0.0454           ❌ EXCLUIR  Orden temporal, no solar
+# Day              0.1962           ❌ EXCLUIR  Correlación espuria (ciclos limpieza)
+# Month/Year       N/A              ❌ EXCLUIR  Constantes (Jun 2017)
+#
+# La irradiance ya está normalizada en [0.003, 1.006] en el dataset.
+
+# Número de features ambientales de entrada al MLP
+NUM_ENV_FEATURES = 1  # Solo irradiance
+
+# Dimensiones del MLP ambiental (rama Fully Connected)
+ENV_FC1_OUT = 32   # Primera capa: 1 → 32
+ENV_FC2_OUT = 64   # Segunda capa: 32 → 64
+
+# Dimensión de fusión: image_features (96) + env_features (64) → fusion
+FUSION_INPUT = 96 + ENV_FC2_OUT   # 160
+FUSION_OUTPUT = 96                # Misma dimensión que FC path original
+
+# Gradient Clipping: limita norma del gradiente para estabilidad
+# Previene explosión de gradientes en la rama MLP ambiental
+GRAD_CLIP_MAX_NORM = 1.0
 
 
