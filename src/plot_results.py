@@ -101,9 +101,10 @@ def plot_training_curves_v3(log_file, save_dir):
 
 
 if __name__ == "__main__":
-    # Uso: python plot_results.py
+    # Uso: python -m src.plot_results
+    from src.config import TRAINING_LOG_NAME
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    LOG_FILE = os.path.join(BASE_DIR, 'training_log_v3.csv')
+    LOG_FILE = os.path.join(BASE_DIR, TRAINING_LOG_NAME)
     SAVE_DIR = os.path.join(BASE_DIR, 'saved_models')
     
     plot_training_curves_v3(LOG_FILE, SAVE_DIR)
