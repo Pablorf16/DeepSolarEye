@@ -1,18 +1,25 @@
 ﻿"""
-train.py - Entrenamiento de DeepSolarEye v3.3
+train.py - Entrenamiento de DeepSolarEye v4.0
 
-Implementación completa del plan de ejecución v3.3:
-  1. Sin sigmoid en salida (regresión abierta)
-  2. Stratified split documentado
-  3. RMSE (optimizing) + R²,MAE (diagnostic)
-  4. Early Stopping con PATIENCE=15
-  5. ReduceLROnPlateau scheduler (patience=7, factor=0.5)
-  6. Oversampling + Data Augmentation (sin WeightedSampler)
-  7. Inyección directa de irradiance (sin rama MLP)
-  8. Gradient Clipping para estabilidad
+Implementación mejorada del plan de ejecución v4.0:
+  1. Estratificación por CUARTILES (límites calculados automáticamente)
+  2. Early Stopping TOLERANTE con reducciones de LR
+  3. Sin sigmoid en salida (regresión abierta)
+  4. RMSE (optimizing) + R², MAE (diagnostic)
+  5. Early Stopping con PATIENCE=15 + tolerancia a reducciones LR
+  6. ReduceLROnPlateau scheduler (patience=7, factor=0.5)
+  7. SIN Data Augmentation (equilibrio por cuartiles)
+  8. Inyección directa de irradiance (sin rama MLP)
+  9. Gradient Clipping para estabilidad
 
-Entrada: CSVs de entrenamiento, validación, test
-Salida: Mejor modelo, checkpoint, training_log_v3.3.csv, gráficas
+CAMBIOS v4.0 (vs v3.2):
+- Entrenamiento limpio desde cero (sin reanudar checkpoints)
+- data_prep.py: Cuartiles automáticos (sin oversampling)
+- dataset.py: Sin augmentación (solo normalización)
+- train.py: Tolerancia en Early Stopping cuando LR se reduce
+
+Entrada: CSVs de entrenamiento, validación, test (con categorías Q1-Q4)
+Salida: Mejor modelo, checkpoint, training_log_v4.0.csv, gráficas
 """
 
 import logging
@@ -307,12 +314,12 @@ def generate_final_report(
 
 def main() -> None:
     """
-    Función principal: orquesta todo el pipeline de entrenamiento.
+    Función principal: orquesta todo el pipeline de entrenamiento v4.0.
     
     Flujo:
-    1. Carga datasets (train oversampleado, val/test originales)
+    1. Carga datasets (train equilibrado por cuartiles, val/test originales)
     2. Inicializa modelo, optimizer, scheduler
-    3. Loop de entrenamiento con early stopping
+    3. Loop de entrenamiento con early stopping TOLERANTE a reducciones de LR
     4. Evaluación final en test set
     5. Generación de gráficas
     """
@@ -322,7 +329,7 @@ def main() -> None:
     # ============================================================
     
     print(f"\n{'='*60}")
-    print("🚀 INICIANDO ENTRENAMIENTO DeepSolarEye v3.3 (Inyección Directa)")
+    print("🚀 INICIANDO ENTRENAMIENTO DeepSolarEye v4.0 (Cuartiles + Tolerancia ES)")
     print("="*60)
     print(f"Dispositivo:        {DEVICE}")
     print(f"SEED:               {SEED}")
@@ -344,14 +351,14 @@ def main() -> None:
     
     logger.info("Cargando datasets...")
     try:
-        # Train: oversampleado (filas duplicadas según categoría)
+        # Train: equilibrado por cuartiles (25% por categoría, NO oversample)
         train_ds = SolarPanelDataset(
             str(TRAIN_CSV),
             str(IMG_DIR),
             transform=get_transforms('train'),
             )
         
-        # Val: original (sin oversample)
+        # Val: original (estratificado, sin modificaciones)
         val_ds = SolarPanelDataset(
             str(VAL_CSV),
             str(IMG_DIR),
@@ -359,7 +366,7 @@ def main() -> None:
             verbose=False
         )
         
-        # Test: original (sin oversample)
+        # Test: original (estratificado, sin modificaciones)
         test_ds = SolarPanelDataset(
             str(TEST_CSV),
             str(IMG_DIR),
@@ -367,9 +374,9 @@ def main() -> None:
             verbose=False
         )
         
-        print(f"   ✅ Train (Oversampleado): {len(train_ds)} muestras")
-        print(f"   ✅ Val (Original):        {len(val_ds)} muestras")
-        print(f"   ✅ Test (Original):       {len(test_ds)} muestras")
+        print(f"   ✅ Train (Cuartiles):     {len(train_ds)} muestras (sin oversample)")
+        print(f"   ✅ Val:                   {len(val_ds)} muestras")
+        print(f"   ✅ Test:                  {len(test_ds)} muestras")
         
     except Exception as e:
         logger.error(f"Error cargando datasets: {e}")
@@ -426,7 +433,7 @@ def main() -> None:
     
     # Intentar cargar checkpoint si existe (para reanudar)
     if CHECKPOINT_FILE.exists():
-        logger.info("Encontrado checkpoint anterior...")
+        logger.info(f"🔄 REANUDANDO ENTRENAMIENTO desde checkpoint existente...")
         try:
             checkpoint = torch.load(str(CHECKPOINT_FILE), map_location=DEVICE)
             model.load_state_dict(checkpoint['model_state_dict'])
@@ -486,9 +493,20 @@ def main() -> None:
             # ReduceLROnPlateau: reduce LR si val_rmse no mejora
             # v3.3: Sin warmup. LR=0.0001 es suficientemente bajo
             # para arranque estable (sin BN1d que desestabilice).
+            
+            # NUEVO v3.2: Detectar reducciones de LR para tolerar ES
+            # El scheduler puede reducir LR EN ESTE PASO, lo que causaría
+            # que ES se dispare sin dar margen. Guardamos LR antes.
+            lr_before = optimizer.param_groups[0]['lr']
             scheduler.step(val_rmse)
             current_lr = optimizer.param_groups[0]['lr']
-            print(f"   📈 Learning Rate: {current_lr:.6f}")
+            lr_just_reduced = (current_lr < lr_before)
+            
+            print(f"   📈 Learning Rate: {current_lr:.6f}", end="")
+            if lr_just_reduced:
+                print(f" (reducido de {lr_before:.6e})")
+            else:
+                print()
             
             # Guardar historial en CSV
             history_entry = {
@@ -515,8 +533,19 @@ def main() -> None:
                 logger.info(f"¡Mejor modelo encontrado! RMSE = {best_val_rmse:.4f}")
                 print(f"   ✅ ¡Mejor modelo! RMSE = {best_val_rmse:.4f}")
             else:
+                # NUEVO v3.2: Tolerancia con ReduceLROnPlateau
+                # Si el scheduler acaba de reducir LR, no contar esta época para ES
+                # Justificación: ES y scheduler pueden competir causando parada prematura
+                # Este cambio da margen para que el modelo se recupere con LR reducido
                 epochs_no_improve += 1
-                print(f"   ⏳ Sin mejora: {epochs_no_improve}/{ES_PATIENCE}")
+                
+                if lr_just_reduced:
+                    # Dar un "pase gratis" cuando LR se reduce
+                    epochs_no_improve = max(0, epochs_no_improve - 1)
+                    print(f"   ⏳ Sin mejora: {epochs_no_improve}/{ES_PATIENCE} "
+                          f"(tolerancia: LR acaba de reducirse)")
+                else:
+                    print(f"   ⏳ Sin mejora: {epochs_no_improve}/{ES_PATIENCE}")
             
             # Guardar checkpoint (para reanudar entrenamiento si se interrumpe)
             torch.save({

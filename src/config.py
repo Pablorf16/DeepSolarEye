@@ -1,11 +1,17 @@
 ﻿"""
-config.py - Configuración centralizada para DeepSolarEye v3.3
+config.py - Configuración centralizada para DeepSolarEye v4.0
 
 Single source of truth para todos los parámetros del proyecto.
 Esto facilita:
   1. Evitar duplicación: Un cambio = un lugar
   2. Sincronización: Todos los módulos leen los mismos valores
   3. Reproducibilidad: SEED centralizado y controlado
+
+v4.0 - ENTRENAMIENTO LIMPIO DESDE CERO:
+- Cuartiles dinámicos para estratificación (25% por clase)
+- Sin oversampling (balanceo automático)
+- Sin augmentación (solo normalización)
+- Early Stopping tolerante con reducciones de LR
 """
 
 import torch
@@ -264,15 +270,15 @@ LOG_LEVEL = 'INFO'  # Niveles: DEBUG, INFO, WARNING, ERROR, CRITICAL
 # Nombre del archivo de historial de training
 # Contiene: epoch, train_rmse, val_rmse, val_mae, val_r2, learning_rate,
 #           rmse por categoría (v3.1+)
-TRAINING_LOG_NAME = 'training_log_v3.3.csv'
+TRAINING_LOG_NAME = 'training_log_v4.0.csv'
 
 # Nombre del archivo de checkpoint (para reanudar entrenamiento)
 # Contiene: model_state_dict, optimizer_state_dict, best_val_rmse, epoch
-CHECKPOINT_NAME = 'checkpoint_v3.3.pth'
+CHECKPOINT_NAME = 'checkpoint_v4.0.pth'
 
 # Nombre del archivo del mejor modelo encontrado
 # Se guarda cuando: val_rmse < best_val_rmse
-BEST_MODEL_NAME = 'best_model_v3.3.pth'
+BEST_MODEL_NAME = 'best_model_v4.0.pth'
 
 # ============================================================
 # CONFIGURACIÓN DE IMAGEN

@@ -1,9 +1,12 @@
 ﻿"""
-model.py - Arquitectura CNN con inyección directa de DeepSolarEye v3.3
+model.py - Arquitectura CNN con inyección directa de DeepSolarEye v4.0
 
 Versión mejorada de ImpactNet para predicción de soiling en paneles solares.
 Input: Imágenes RGB (224×224) + Features ambientales (irradiance)
 Output: Pérdida de potencia (regresión abierta, sin sigmoid)
+
+NOTA: La arquitectura NO cambió desde v3.3. Solo métodos de entrenamiento
+en train.py y dataset.py fueron optimizados (cuartiles, sin augmentación, ES tolerante).
 """
 
 import torch

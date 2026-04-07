@@ -32,7 +32,7 @@ def plot_training_curves_v3(log_file, save_dir):
         
         # Crear figura con subgráficos
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-        fig.suptitle('DeepSolarEye v3.0 - Análisis de Entrenamiento', fontsize=16, fontweight='bold', y=0.995)
+        fig.suptitle('DeepSolarEye v4.0 - Análisis de Entrenamiento', fontsize=16, fontweight='bold', y=0.995)
         
         # ============== GRÁFICA 1: RMSE ==============
         ax1 = axes[0, 0]

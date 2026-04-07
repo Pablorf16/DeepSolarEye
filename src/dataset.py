@@ -1,5 +1,5 @@
 ﻿"""
-dataset.py - Cargador de datos para DeepSolarEye v3.2
+dataset.py - Cargador de datos para DeepSolarEye v4.0
 
 PyTorch Dataset multi-modal para cargar imágenes de paneles solares
 junto con features ambientales (irradiance) desde archivos CSV.
@@ -296,22 +296,16 @@ def get_transforms(phase: str = 'train') -> transforms.Compose:
         )
     
     if phase == 'train':
-        # Augmentación agresiva para entrenamiento
+        # v3.2: SIN AUGMENTACIÓN
+        # JUSTIFICACIÓN: Cuartiles balancean clases → oversampling innecesario
+        # Sin oversampling, no hay riesgo de memorización → augmentación innecesaria
+        # Esto reduce complejidad y error, permitiendo que el modelo converja mas limpiamente
         return transforms.Compose([
             # Redimensiona a 224×224 (tamaño entrada modelo)
             transforms.Resize((IMG_SIZE, IMG_SIZE)),
-            # Volteo horizontal aleatorio (p=50%)
-            transforms.RandomHorizontalFlip(p=AUGMENTATION_STRATEGY['horizontal_flip']),
-            # Volteo vertical aleatorio (p=50%)
-            transforms.RandomVerticalFlip(p=AUGMENTATION_STRATEGY['vertical_flip']),
-            # Rotación CONTINUA en rango [-180°, +180°] = círculo completo
-            # torchvision.transforms.RandomRotation(degrees=AUGMENTATION_STRATEGY['rotation_degrees']) rota dentro
-            # de este rango de forma aleatoria uniforme
-            transforms.RandomRotation(degrees=AUGMENTATION_STRATEGY['rotation_degrees']),
             # Convierte PIL Image → torch.Tensor en rango [0, 1]
             transforms.ToTensor(),
             # Normaliza con parámetros ImageNet (media y desv. estándar)
-            # Valores: imagen normalizada = (imagen - mean) / std
             transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
         ])
     else:

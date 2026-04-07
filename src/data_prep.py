@@ -1,13 +1,17 @@
 ﻿"""
-data_prep.py - Preparación de datos para DeepSolarEye v3.0
+data_prep.py - Preparación de datos para DeepSolarEye v4.0
 
 Pipeline de extracción, validación y división estratificada de datos.
+
+CAMBIO v4.0: Estratificación por CUARTILES (en lugar de categorías predefinidas).
+Los límites se calculan dinámicamente usando np.percentile([25, 50, 75]),
+garantizando que cada categoría tenga exactamente 25% de muestras.
 
 Entrada: Imágenes RAW en data/raw/Solar_Panel_Soiling_Image_dataset/PanelImages/
          con nombres como: *_L_{power_loss}_I_{irradiance}_{date}
 
 Salida: CSVs estratificados:
-  - data/processed/train_dataset.csv (60%, oversampleado)
+  - data/processed/train_dataset.csv (60%, NO oversampleado en v4.0)
   - data/processed/val_dataset.csv (20%, original)
   - data/processed/test_dataset.csv (20%, original)
 """
@@ -257,12 +261,28 @@ def process_and_split() -> None:
     # Validación: power_loss ∈ [0, 100]%
     df = df[(df['power_loss'] >= 0) & (df['power_loss'] <= 100)]
     
-    # ESTRATIFICACIÓN: Crear categorías de suciedad
-    # (explicadas exhaustivamente en config.py)
+    # ESTRATIFICACIÓN: Crear categorías por cuartiles (v3.2)
+    # CAMBIO: En lugar de categorías predefinidas (v3.0-v3.1), usar cuartiles
+    # automáticos. Esto garantiza que cada categoría tenga ~25% de muestras.
+    # Referencia: Feedback del tutor - usar np.percentile([25, 50, 75])
+    import numpy as np
+    q25, q50, q75 = np.percentile(df['power_loss'], [25, 50, 75])
+    
+    # Crear bins dinámicos con cuartiles
+    # Los límites exactos dependen del dataset, no de valores hardcodeados
+    quartile_bins = [-1, q25, q50, q75, 105]
+    quartile_labels = ['Q1_Limpio', 'Q2_Moderado', 'Q3_Alto', 'Q4_Crítico']
+    
+    logger.info(f"\n=== CUARTILES CALCULADOS ===")
+    logger.info(f"Q1 (0-25%):     {q25:.2f}%")
+    logger.info(f"Q2 (25-50%):    {q50:.2f}%")
+    logger.info(f"Q3 (50-75%):    {q75:.2f}%")
+    logger.info(f"Q4 (75-100%):   100.00%\n")
+    
     df['dirt_category'] = pd.cut(
         df['power_loss'],
-        bins=CATEGORY_BINS,
-        labels=CATEGORY_LABELS,
+        bins=quartile_bins,
+        labels=quartile_labels,
         include_lowest=True
     )
     
@@ -291,15 +311,14 @@ def process_and_split() -> None:
         stratify=temp_df['dirt_category']
     )
     
-    logger.info(f"✅ Split realizado:")
-    logger.info(f"   Train (antes oversample): {len(train_df)} muestras")
-    logger.info(f"   Val:  {len(val_df)} muestras")
-    logger.info(f"   Test: {len(test_df)} muestras")
+    logger.info(f"✅ Split realizado (BALANCED por cuartiles)")
+    logger.info(f"   Train: {len(train_df)} muestras (25% por cuartil)")
+    logger.info(f"   Val:   {len(val_df)} muestras")
+    logger.info(f"   Test:  {len(test_df)} muestras")
     
-    # OVERSAMPLING: SOLO en train_df (después del split)
-    # NOTA CRÍTICA: Oversample DESPUÉS del split previene data leakage
-    logger.info("\n🌊 APLICANDO OVERSAMPLING AL TRAIN SET...")
-    train_df = oversample_dataframe(train_df, stratify_col='dirt_category')
+    # v3.2: SIN OVERSAMPLING
+    # JUSTIFICACIÓN: Los cuartiles garantizan 25% por clase automáticamente
+    # No hay desbalance → oversample innecesario → reducción de error
     
     # GUARDADO: Crear directorio y guardar CSVs
     PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -308,7 +327,7 @@ def process_and_split() -> None:
     test_df.to_csv(PROCESSED_DATA_DIR / "test_dataset.csv", index=False)
     
     logger.info(f"\n✅ Datos guardados en {PROCESSED_DATA_DIR}")
-    logger.info(f"   Train samples (oversampleado): {len(train_df)}")
+    logger.info(f"   Train samples (SIN oversample): {len(train_df)}")
     logger.info(f"   Val samples:   {len(val_df)}")
     logger.info(f"   Test samples:  {len(test_df)}")
     logger.info(f"   Total:         {len(train_df) + len(val_df) + len(test_df)}")
