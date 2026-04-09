@@ -1,14 +1,4 @@
-﻿"""
-eda.py - Análisis Exploratorio de Datos para DeepSolarEye v3.0
-
-Genera visualizaciones del dataset para análisis y documentación.
-Utiliza configuración centralizada de config.py.
-
-Salida: reports/figures/
-  - power_loss_histogram.png
-  - power_loss_by_category.png
-  - irradiance_histogram.png
-"""
+﻿
 
 import logging
 from pathlib import Path
@@ -33,25 +23,14 @@ OUTPUT_DIR = BASE_DIR / 'reports' / 'figures'
 
 
 def plot_power_loss_distribution(csv_path: Path, output_dir: Path) -> bool:
-    """
-    Genera histograma de distribución de pérdida de potencia.
-    
-    Permite detectar desbalanceo de clases y sesgos en el dataset.
-    Útil para justificar estrategia de oversampling en memoria TFG.
+    """Genera histograma de distribución de pérdida de potencia.
     
     Args:
-        csv_path (Path): Ruta al CSV con columna 'power_loss'
-        output_dir (Path): Directorio donde guardar la figura
+        csv_path: Ruta al CSV con columna 'power_loss'
+        output_dir: Directorio donde guardar la figura
     
     Returns:
         bool: True si éxito, False si error
-    
-    Example:
-        >>> plot_power_loss_distribution(
-        ...     Path('data/processed/train_dataset.csv'),
-        ...     Path('reports/figures/')
-        ... )
-        True
     """
     try:
         df = pd.read_csv(csv_path)
@@ -63,7 +42,6 @@ def plot_power_loss_distribution(csv_path: Path, output_dir: Path) -> bool:
         sns.set_theme(style="whitegrid")
         plt.figure(figsize=(12, 6))
         
-        # Histograma con KDE
         sns.histplot(df['power_loss'], bins=50, kde=True, color='royalblue')
         
         # Líneas verticales para límites de categorías
@@ -72,7 +50,7 @@ def plot_power_loss_distribution(csv_path: Path, output_dir: Path) -> bool:
             plt.text(limit + 1, plt.ylim()[1] * 0.9, CATEGORY_LABELS[i], 
                      fontsize=9, color='darkred')
         
-        plt.title('Distribución de Pérdida de Potencia - DeepSolarEye v3.0', 
+        plt.title('Distribución de Pérdida de Potencia', 
                   fontsize=14, fontweight='bold')
         plt.xlabel('Pérdida de Potencia (%)', fontsize=12)
         plt.ylabel('Frecuencia (Número de Imágenes)', fontsize=12)
@@ -91,15 +69,11 @@ def plot_power_loss_distribution(csv_path: Path, output_dir: Path) -> bool:
 
 
 def plot_category_distribution(csv_path: Path, output_dir: Path) -> bool:
-    """
-    Genera gráfico de barras por categoría de suciedad.
-    
-    Visualiza balance entre categorías (Limpio/Leve/Moderado/Alto/Crítico).
-    Justifica necesidad de oversampling si hay desbalance.
+    """Genera gráfico de barras por categoría de suciedad.
     
     Args:
-        csv_path (Path): Ruta al CSV con columna 'dirt_category'
-        output_dir (Path): Directorio donde guardar la figura
+        csv_path: Ruta al CSV con columna 'dirt_category'
+        output_dir: Directorio donde guardar la figura
     
     Returns:
         bool: True si éxito, False si error
@@ -119,20 +93,17 @@ def plot_category_distribution(csv_path: Path, output_dir: Path) -> bool:
         sns.set_theme(style="whitegrid")
         plt.figure(figsize=(10, 6))
         
-        # Contar por categoría y ordenar
         category_counts = df['dirt_category'].value_counts().reindex(CATEGORY_LABELS).fillna(0).astype(int)
         
-        # Colores por severidad
         colors = ['#2ecc71', '#f1c40f', '#e67e22', '#e74c3c', '#8e44ad']
         
         bars = plt.bar(CATEGORY_LABELS, category_counts, color=colors, edgecolor='black')
         
-        # Etiquetas en barras
         for bar, count in zip(bars, category_counts):
             plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 5,
                      f'{int(count)}', ha='center', fontsize=10, fontweight='bold')
         
-        plt.title('Distribución por Categoría de Suciedad - DeepSolarEye v3.0',
+        plt.title('Distribución por Categoría de Suciedad',
                   fontsize=14, fontweight='bold')
         plt.xlabel('Categoría de Suciedad', fontsize=12)
         plt.ylabel('Número de Imágenes', fontsize=12)
@@ -152,12 +123,11 @@ def plot_category_distribution(csv_path: Path, output_dir: Path) -> bool:
 
 
 def plot_irradiance_distribution(csv_path: Path, output_dir: Path) -> bool:
-    """
-    Genera histograma de irradiancia solar (si disponible).
+    """Genera histograma de irradiancia solar (si disponible).
     
     Args:
-        csv_path (Path): Ruta al CSV con columna 'irradiance' (opcional)
-        output_dir (Path): Directorio donde guardar la figura
+        csv_path: Ruta al CSV con columna 'irradiance' (opcional)
+        output_dir: Directorio donde guardar la figura
     
     Returns:
         bool: True si éxito o columna no disponible, False si error
@@ -174,7 +144,7 @@ def plot_irradiance_distribution(csv_path: Path, output_dir: Path) -> bool:
         
         sns.histplot(df['irradiance'], bins=30, kde=True, color='darkorange')
         
-        plt.title('Distribución de Irradiancia Solar - DeepSolarEye v3.0',
+        plt.title('Distribución de Irradiancia Solar',
                   fontsize=14, fontweight='bold')
         plt.xlabel('Irradiancia (W/m²)', fontsize=12)
         plt.ylabel('Frecuencia', fontsize=12)
@@ -193,33 +163,31 @@ def plot_irradiance_distribution(csv_path: Path, output_dir: Path) -> bool:
 
 
 def run_eda() -> None:
-    """
-    Ejecuta análisis exploratorio completo del dataset.
+    """Ejecuta análisis exploratorio completo del dataset.
     
-    Genera todas las visualizaciones en reports/figures/.
-    Requiere haber ejecutado data_prep.py primero.
+    Genera visualizaciones en reports/figures/.
+    Requiere ejecutar data_prep.py primero.
     """
     logger.info("=" * 60)
-    logger.info("ANÁLISIS EXPLORATORIO DE DATOS (EDA) - DeepSolarEye v3.0")
+    logger.info("EXPLORATORY DATA ANALYSIS (EDA)")
     logger.info("=" * 60)
     
     train_csv = PROCESSED_DIR / 'train_dataset.csv'
     
     if not train_csv.exists():
         logger.error(f"No se encuentra: {train_csv}")
-        logger.error("Ejecuta primero: python src/data_prep.py")
+        logger.error("Ejecuta primero: python -m src.data_prep")
         return
     
     logger.info(f"Dataset: {train_csv}")
-    logger.info(f"Output:  {OUTPUT_DIR}")
+    logger.info(f"Output: {OUTPUT_DIR}")
     
-    # Generar visualizaciones
     plot_power_loss_distribution(train_csv, OUTPUT_DIR)
     plot_category_distribution(train_csv, OUTPUT_DIR)
     plot_irradiance_distribution(train_csv, OUTPUT_DIR)
     
     logger.info("=" * 60)
-    logger.info("EDA COMPLETADO")
+    logger.info("EDA COMPLETED")
     logger.info("=" * 60)
 
 

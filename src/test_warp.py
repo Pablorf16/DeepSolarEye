@@ -1,12 +1,7 @@
-﻿"""
-test_warp.py - Prueba de transformación de perspectiva para DeepSolarEye v3.0
+﻿"""Perspective transformation test for solar panel images.
 
-Aplica corrección de perspectiva (warp) a imágenes de paneles solares.
-Útil para pre-procesamiento de imágenes capturadas en ángulo.
-
-Salida: reports/figures/warp_test/
-  - 1_marcada.jpg (imagen original con ROI marcado)
-  - 2_aplanada.jpg (imagen corregida a 224×224)
+Applies perspective correction (warp) to correct angled captures.
+Output: reports/figures/warp_test/
 """
 
 import logging
@@ -26,34 +21,26 @@ logger = logging.getLogger(__name__)
 
 
 def probar_recorte() -> bool:
-    """
-    Ejecuta prueba de transformación de perspectiva.
+    """Executes perspective transformation test.
     
-    Busca una imagen en el directorio RAW, aplica corrección de perspectiva
-    y guarda los resultados en reports/figures/warp_test/.
-    
-    La transformación convierte una región trapezoidal (panel en ángulo)
-    en una imagen cuadrada de IMG_SIZE×IMG_SIZE píxeles.
+    Finds image in RAW directory, applies perspective correction
+    and saves results in reports/figures/warp_test/.
     
     Returns:
-        bool: True si éxito, False si error
-    
-    Example:
-        >>> success = probar_recorte()
-        >>> print("OK" if success else "Error")
+        bool: True if successful, False if error
     """
     logger.info("=" * 50)
-    logger.info("PRUEBA DE TRANSFORMACIÓN DE PERSPECTIVA (WARP)")
+    logger.info("PERSPECTIVE TRANSFORMATION TEST")
     logger.info("=" * 50)
     
-    # Rutas base
+    # Base paths
     BASE_DIR = Path(__file__).resolve().parent.parent
     RAW_DATA_DIR = BASE_DIR / "data" / "raw" / "Solar_Panel_Soiling_Image_dataset" / "PanelImages"
     OUTPUT_DIR = BASE_DIR / "reports" / "figures" / "warp_test"
     
-    logger.info(f"Buscando imágenes en: {RAW_DATA_DIR}")
+    logger.info(f"Searching for images in: {RAW_DATA_DIR}")
     
-    # Búsqueda robusta de imágenes (múltiples extensiones)
+    # Robust image search (multiple extensions)
     valid_extensions = {'.jpg', '.jpeg', '.png'}
     image_files = [
         path for path in RAW_DATA_DIR.rglob('*')
@@ -61,34 +48,34 @@ def probar_recorte() -> bool:
     ]
     
     if not image_files:
-        logger.error("No se encontraron imágenes en la carpeta.")
-        logger.error(f"Extensiones soportadas: {valid_extensions}")
+        logger.error("No images found in directory.")
+        logger.error(f"Supported extensions: {valid_extensions}")
         return False
     
-    # Seleccionar la primera imagen encontrada
+    # Select first image
     image_path = image_files[0]
-    logger.info(f"Imagen encontrada: {image_path.name}")
+    logger.info(f"Image found: {image_path.name}")
     
-    # Lectura robusta en Windows (maneja rutas con caracteres especiales)
+    # Robust reading on Windows (handles special characters)
     img = cv2.imdecode(
         np.fromfile(str(image_path), dtype=np.uint8),
         cv2.IMREAD_COLOR
     )
     
     if img is None:
-        logger.error("El archivo existe, pero OpenCV no puede abrirlo.")
-        logger.error(f"Verifica que sea una imagen válida: {image_path}")
+        logger.error("File exists but OpenCV cannot read it.")
+        logger.error(f"Verify it is a valid image: {image_path}")
         return False
     
-    logger.info("Imagen cargada exitosamente. Aplicando transformación...")
+    logger.info("Image loaded successfully. Applying transformation...")
     
-    # Geometría: coordenadas genéricas relativas a dimensión de imagen
+    # Geometry: relative coordinates
     h, w = img.shape[:2]
     pts_origen = np.float32([
-        [w * 0.15, h * 0.10],   # Esquina superior izquierda
-        [w * 0.85, h * 0.15],   # Esquina superior derecha
-        [w * 0.85, h * 0.95],   # Esquina inferior derecha
-        [w * 0.15, h * 0.90]    # Esquina inferior izquierda
+        [w * 0.15, h * 0.10],   # Top-left
+        [w * 0.85, h * 0.15],   # Top-right
+        [w * 0.85, h * 0.95],   # Bottom-right
+        [w * 0.15, h * 0.90]    # Bottom-left
     ])
     pts_destino = np.float32([
         [0, 0],
@@ -97,11 +84,11 @@ def probar_recorte() -> bool:
         [0, IMG_SIZE]
     ])
     
-    # Transformación de perspectiva
+    # Perspective transformation
     matriz = cv2.getPerspectiveTransform(pts_origen, pts_destino)
     img_aplanada = cv2.warpPerspective(img, matriz, (IMG_SIZE, IMG_SIZE))
     
-    # Dibujar polígono para visualización
+    # Draw polygon for visualization
     img_marcada = img.copy()
     cv2.polylines(
         img_marcada,
@@ -111,15 +98,15 @@ def probar_recorte() -> bool:
         thickness=2
     )
     
-    # Guardar resultados
+    # Save results
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(OUTPUT_DIR / "1_marcada.jpg"), img_marcada)
-    cv2.imwrite(str(OUTPUT_DIR / "2_aplanada.jpg"), img_aplanada)
+    cv2.imwrite(str(OUTPUT_DIR / "1_original_marked.jpg"), img_marcada)
+    cv2.imwrite(str(OUTPUT_DIR / "2_corrected.jpg"), img_aplanada)
     
-    logger.info(f"Transformación completada.")
-    logger.info(f"   Original: {image_path.name} ({w}×{h})")
-    logger.info(f"   Salida:   {OUTPUT_DIR}")
-    logger.info(f"   Tamaño:   {IMG_SIZE}×{IMG_SIZE}")
+    logger.info(f"Transformation completed.")
+    logger.info(f"   Original: {image_path.name} ({w}x{h})")
+    logger.info(f"   Output:   {OUTPUT_DIR}")
+    logger.info(f"   Size:     {IMG_SIZE}x{IMG_SIZE}")
     logger.info("=" * 50)
     
     return True

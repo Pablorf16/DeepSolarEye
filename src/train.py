@@ -1,26 +1,4 @@
-﻿"""
-train.py - Entrenamiento de DeepSolarEye v4.0
-
-Implementación mejorada del plan de ejecución v4.0:
-  1. Estratificación por CUARTILES (límites calculados automáticamente)
-  2. Early Stopping TOLERANTE con reducciones de LR
-  3. Sin sigmoid en salida (regresión abierta)
-  4. RMSE (optimizing) + R², MAE (diagnostic)
-  5. Early Stopping con PATIENCE=15 + tolerancia a reducciones LR
-  6. ReduceLROnPlateau scheduler (patience=7, factor=0.5)
-  7. SIN Data Augmentation (equilibrio por cuartiles)
-  8. Inyección directa de irradiance (sin rama MLP)
-  9. Gradient Clipping para estabilidad
-
-CAMBIOS v4.0 (vs v3.2):
-- Entrenamiento limpio desde cero (sin reanudar checkpoints)
-- data_prep.py: Cuartiles automáticos (sin oversampling)
-- dataset.py: Sin augmentación (solo normalización)
-- train.py: Tolerancia en Early Stopping cuando LR se reduce
-
-Entrada: CSVs de entrenamiento, validación, test (con categorías Q1-Q4)
-Salida: Mejor modelo, checkpoint, training_log_v4.0.csv, gráficas
-"""
+﻿
 
 import logging
 import os
@@ -58,27 +36,14 @@ from src.config import (
 from src.dataset import SolarPanelDataset, get_transforms
 from src.model import Net
 
-# ============================================================
-# CONFIGURACIÓN DE LOGGING
-# ============================================================
-
-# Configurar logging para profesionalismo académico
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),  # Mostrar en consola
-        # logging.FileHandler('training.log')  # Opcional: guardar en archivo
-    ]
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
-# ============================================================
-# CONFIGURACIÓN v3.2
-# ============================================================
-
-# Reproducibilidad: SEED fijo (importado de config.py)
-# Aplicado a: torch, numpy, random, deterministic mode
+# Reproducibility: set seed across all libraries
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
@@ -86,9 +51,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(SEED)
     torch.backends.cudnn.deterministic = True
 
-
-
-# Rutas dinámicas (usando pathlib para coherencia cross-platform)
+# Dynamic paths for cross-platform compatibility
 BASE_DIR = Path(__file__).resolve().parent.parent
 TRAIN_CSV = BASE_DIR / 'data' / 'processed' / 'train_dataset.csv'
 VAL_CSV = BASE_DIR / 'data' / 'processed' / 'val_dataset.csv'
@@ -98,10 +61,6 @@ SAVE_DIR = BASE_DIR / 'saved_models'
 LOG_FILE = BASE_DIR / TRAINING_LOG_NAME
 CHECKPOINT_FILE = SAVE_DIR / CHECKPOINT_NAME
 
-# ============================================================
-# FUNCIONES DE ENTRENAMIENTO
-# ============================================================
-
 
 def train_one_epoch(
     model: nn.Module,
@@ -109,63 +68,34 @@ def train_one_epoch(
     criterion: nn.Module,
     optimizer: optim.Optimizer,
 ) -> float:
-    """
-    Entrena el modelo durante una época.
-    
-    Calcula MSE promedio y retorna como RMSE para consistencia con validate().
-    
-    CAMBIO v3.2: Recibe 3-tupla (image, label, env) del DataLoader y
-    aplica gradient clipping para estabilidad de la rama MLP.
-    
-    Args:
-        model (nn.Module): Red neuronal en modo entrenamiento
-        loader (DataLoader): Cargador de datos de entrenamiento
-        criterion (nn.Module): Función de pérdida (MSELoss)
-        optimizer (optim.Optimizer): Optimizador (Adam)
-    
-    Returns:
-        float: RMSE de entrenamiento (raíz del MSE promedio)
-    
-    Features:
-        - Barra de progreso con tqdm
-        - Cálculo incremental de RMSE
-        - Movimiento de tensores a dispositivo
-        - Gradient clipping (v3.2)
-    """
+    """Train model for one epoch. Returns training RMSE."""
     model.train()
     total_mse = 0.0
     num_samples = 0
-    
-    # Barra de progreso durante época
+
     loop = tqdm(loader, desc="Training", leave=False)
     for images, labels, env in loop:
-        # Mover datos a dispositivo (GPU o CPU)
-        images = images.to(DEVICE)
-        labels = labels.to(DEVICE).float()
-        env = env.to(DEVICE)
-        
-        # Forward pass (v3.2: pasar env features al modelo)
+        images, labels, env = (
+            images.to(DEVICE),
+            labels.to(DEVICE).float(),
+            env.to(DEVICE)
+        )
+
         optimizer.zero_grad()
         outputs = model(images, env)
-        
-        # Backward pass
-        loss = criterion(outputs.squeeze(dim=1), labels)  # MSE
+        loss = criterion(outputs.squeeze(dim=1), labels)
         loss.backward()
-        
-        # Gradient Clipping (v3.2): limita norma para estabilidad MLP
+
+        # Gradient clipping prevents exploding gradients
         torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_MAX_NORM)
-        
         optimizer.step()
-        
-        # Acumular métrica
+
         total_mse += loss.item() * images.size(0)
         num_samples += images.size(0)
         loop.set_postfix(mse=loss.item())
-    
-    # Retornar RMSE (no MSE) para interpretabilidad
+
     mse = total_mse / num_samples
     rmse = np.sqrt(mse)
-    
     return rmse
 
 
@@ -174,32 +104,9 @@ def validate(
     loader: DataLoader,
     criterion: nn.Module,
 ) -> Tuple[float, float, float, np.ndarray, np.ndarray, float, dict]:
-    """
-    Evalúa el modelo en un conjunto de validación o test.
+    """Evaluate model on validation/test set with comprehensive metrics.
     
-    Calcula múltiples métricas para evaluación exhaustiva:
-    - RMSE: Métrica de optimización (penaliza errores grandes)
-    - MAE, R²: Métricas de diagnóstico
-    - Out-of-bounds: Indicador de problemas
-    - RMSE por categoría: Diagnóstico de outliers (v3.1)
-    
-    CAMBIO v3.2: Recibe 3-tupla y pasa env features al modelo.
-    
-    Args:
-        model (nn.Module): Red neuronal en modo evaluación
-        loader (DataLoader): Cargador de datos de validación/test
-        criterion (nn.Module): Función de pérdida
-    
-    Returns:
-        Tuple: (rmse, mae, r2, y_true, y_pred, out_of_bounds_pct, rmse_by_cat)
-            donde:
-            - rmse (float): Raíz del error cuadrático medio
-            - mae (float): Error absoluto medio
-            - r2 (float): Coeficiente de determinación
-            - y_true (np.ndarray): Labels verdaderos
-            - y_pred (np.ndarray): Predicciones del modelo
-            - out_of_bounds_pct (float): % de predicciones fuera [0, 100]
-            - rmse_by_cat (dict): RMSE por categoría para diagnóstico outliers
+    Returns: (rmse, mae, r2, y_true, y_pred, out_of_bounds_pct, rmse_by_cat)
     """
     model.eval()
     total_mse = 0.0
@@ -207,41 +114,32 @@ def validate(
     all_labels = []
     num_samples = 0
     
-    # Evaluación sin cálculo de gradientes (más rápido)
     with torch.no_grad():
         for images, labels, env in loader:
             images = images.to(DEVICE)
             labels = labels.to(DEVICE).float()
             env = env.to(DEVICE)
             
-            # Forward pass (v3.2: pasar env features al modelo)
             outputs = model(images, env)
             loss = criterion(outputs.squeeze(dim=1), labels)
             
-            # Acumular MSE
             total_mse += loss.item() * images.size(0)
             num_samples += images.size(0)
-            
-            # Guardar predicciones para métricas finales
             all_preds.extend(outputs.squeeze(dim=1).cpu().numpy().flatten())
             all_labels.extend(labels.cpu().numpy().flatten())
     
-    # Convertir listas a arrays
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)
     
-    # Calcular métricas
     mse = total_mse / num_samples
     rmse = np.sqrt(mse)
     mae = mean_absolute_error(all_labels, all_preds)
     r2 = r2_score(all_labels, all_preds)
     
-    # Diagnóstico: % de predicciones fuera de rango físico [0, 100]
     out_of_bounds = np.sum((all_preds < 0) | (all_preds > 100))
     out_of_bounds_pct = 100 * out_of_bounds / len(all_preds)
     
-    # v3.1: Calcular RMSE por categoría para diagnóstico de outliers
-    # Ratio MAE/RMSE = 0.64 (esperado 0.8) indica presencia de outliers
+    # Compute RMSE per category for diagnostic analysis
     rmse_by_cat = {}
     true_cats = pd.cut(
         all_labels,
@@ -264,21 +162,11 @@ def generate_final_report(
     y_true: np.ndarray,
     y_pred: np.ndarray,
 ) -> None:
-    """
-    Genera reporte académico final con matriz de confusión.
-    
-    Discretiza predicciones continuas en categorías (Limpio, Leve, etc.)
-    y genera matriz de confusión para análisis por categoría.
-    
-    Args:
-        y_true (np.ndarray): Labels verdaderos en escala continua [0, 100]
-        y_pred (np.ndarray): Predicciones del modelo [0, 100]
-    """
+    """Generate confusion matrix report with categorical discretization."""
     print("\n" + "=" * 60)
-    print("📊 REPORTE FINAL DE VALIDACIÓN (TEST SET)")
+    print("FINAL VALIDATION REPORT (TEST SET)")
     print("=" * 60)
     
-    # Discretizar predicciones continuas en categorías
     y_true_cat = pd.cut(
         y_true,
         bins=CATEGORY_BINS,
@@ -292,17 +180,14 @@ def generate_final_report(
         include_lowest=True
     )
     
-    # Calcular matriz de confusión
     cm = confusion_matrix(y_true_cat, y_pred_cat, labels=CATEGORY_LABELS)
     
-    # Mostrar matriz de confusión
-    print("\nMatriz de Confusión (Categorías de Suciedad):")
+    print("\nConfusion Matrix (Soiling Categories):")
     print("      ", "  ".join(f"{l[:3]}" for l in CATEGORY_LABELS))
     for i, label in enumerate(CATEGORY_LABELS):
         print(f"{label[:3]}: ", "  ".join(f"{c:3d}" for c in cm[i]))
     
-    # Calcular y mostrar precisión por categoría
-    print("\nPrecisión por Categoría:")
+    print("\nAccuracy per Category:")
     for i, label in enumerate(CATEGORY_LABELS):
         total = cm[i].sum()
         correct = cm[i, i] if total > 0 else 0
@@ -313,43 +198,22 @@ def generate_final_report(
 
 
 def main() -> None:
-    """
-    Función principal: orquesta todo el pipeline de entrenamiento v4.0.
-    
-    Flujo:
-    1. Carga datasets (train equilibrado por cuartiles, val/test originales)
-    2. Inicializa modelo, optimizer, scheduler
-    3. Loop de entrenamiento con early stopping TOLERANTE a reducciones de LR
-    4. Evaluación final en test set
-    5. Generación de gráficas
-    """
-    
-    # ============================================================
-    # INICIALIZACIÓN Y CONFIGURACIÓN
-    # ============================================================
+    """Main training orchestration pipeline."""
     
     print(f"\n{'='*60}")
-    print("🚀 INICIANDO ENTRENAMIENTO DeepSolarEye v4.0 (Cuartiles + Tolerancia ES)")
+    print("Starting Training Pipeline")
     print("="*60)
-    print(f"Dispositivo:        {DEVICE}")
-    print(f"SEED:               {SEED}")
-    print(f"Learning Rate:      {LEARNING_RATE}")
-    print(f"Batch Size:         {BATCH_SIZE}")
-    print(f"ES Patience:        {ES_PATIENCE}")
-    print(f"Scheduler Patience: {SCHEDULER_PATIENCE}")
-    print(f"Scheduler Factor:   {SCHEDULER_FACTOR}")
-    print(f"Gradient Clipping:  {GRAD_CLIP_MAX_NORM}")
-    print(f"MAX Epochs:         {MAX_EPOCHS}")
+    print(f"Device:         {DEVICE}")
+    print(f"SEED:           {SEED}")
+    print(f"Learning Rate:  {LEARNING_RATE}")
+    print(f"Batch Size:     {BATCH_SIZE}")
+    print(f"ES Patience:    {ES_PATIENCE}")
+    print(f"MAX Epochs:     {MAX_EPOCHS}")
     print("="*60 + "\n")
     
-    # Crear directorios de salida
     os.makedirs(str(SAVE_DIR), exist_ok=True)
     
-    # ============================================================
-    # 1. CARGA DE DATASETS
-    # ============================================================
-    
-    logger.info("Cargando datasets...")
+    logger.info("Loading datasets...")
     try:
         # Train: equilibrado por cuartiles (25% por categoría, NO oversample)
         train_ds = SolarPanelDataset(
@@ -374,9 +238,9 @@ def main() -> None:
             verbose=False
         )
         
-        print(f"   ✅ Train (Cuartiles):     {len(train_ds)} muestras (sin oversample)")
-        print(f"   ✅ Val:                   {len(val_ds)} muestras")
-        print(f"   ✅ Test:                  {len(test_ds)} muestras")
+        print(f"   Train (Cuartiles): {len(train_ds)} samples")
+        print(f"   Val: {len(val_ds)} samples")
+        print(f"   Test: {len(test_ds)} samples")
         
     except Exception as e:
         logger.error(f"Error cargando datasets: {e}")
@@ -400,40 +264,29 @@ def main() -> None:
         num_workers=0
     )
     
-    # ============================================================
-    # 2. INICIALIZACIÓN: MODELO, OPTIMIZER, SCHEDULER
-    # ============================================================
-    
-    logger.info("Inicializando modelo y optimizador...")
+    logger.info("Initializing model and optimizer...")
     model = Net().to(DEVICE)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     
-    # ReduceLROnPlateau: reduce LR cuando val_rmse no mejora
-    # Nota: verbose=True está deprecated en PyTorch 2.0+, se utiliza logging en su lugar
     scheduler = ReduceLROnPlateau(
         optimizer,
-        mode='min',           # Minimizar RMSE
-        factor=SCHEDULER_FACTOR,  # LR *= SCHEDULER_FACTOR
+        mode='min',
+        factor=SCHEDULER_FACTOR,
         patience=SCHEDULER_PATIENCE,
     )
 
-    print(f"   ✅ Modelo en {DEVICE}")
-    print(f"   ✅ Optimizer: Adam(lr={LEARNING_RATE})")
-    print(f"   ✅ Scheduler: ReduceLROnPlateau(patience={SCHEDULER_PATIENCE})")
-    
-    # ============================================================
-    # 3. VARIABLES DE CONTROL DEL ENTRENAMIENTO
-    # ============================================================
+    print(f"   Model on: {DEVICE}")
+    print(f"   Optimizer: Adam(lr={LEARNING_RATE})")
+    print(f"   Scheduler: ReduceLROnPlateau(patience={SCHEDULER_PATIENCE})")
     
     best_val_rmse = float('inf')
     epochs_no_improve = 0
     history = []
     start_epoch = 0
     
-    # Intentar cargar checkpoint si existe (para reanudar)
     if CHECKPOINT_FILE.exists():
-        logger.info(f"🔄 REANUDANDO ENTRENAMIENTO desde checkpoint existente...")
+        logger.info("Resuming training from checkpoint...")
         try:
             checkpoint = torch.load(str(CHECKPOINT_FILE), map_location=DEVICE)
             model.load_state_dict(checkpoint['model_state_dict'])
@@ -443,72 +296,55 @@ def main() -> None:
             best_val_rmse = checkpoint['best_val_rmse']
             epochs_no_improve = checkpoint['epochs_no_improve']
 
-            # Cargar historial previo
             if LOG_FILE.exists():
                 history = pd.read_csv(str(LOG_FILE)).to_dict('records')
 
-            print(f"   ✅ Reanudando desde época {start_epoch + 1}")
-            print(f"   ✅ Best val RMSE: {best_val_rmse:.4f}")
+            print(f"   Resuming from epoch {start_epoch + 1}")
+            print(f"   Best val RMSE: {best_val_rmse:.4f}")
 
         except RuntimeError as e:
-            logger.warning(f"Checkpoint incompatible con modelo actual: {e}")
-            logger.warning("Iniciando entrenamiento desde cero...")
-            # Reset a valores iniciales (ya definidos arriba)
+            logger.warning(f"Checkpoint incompatible: {e}")
+            logger.warning("Starting training from scratch...")
     else:
-        logger.info("Empezando entrenamiento desde cero")
-    
-    # ============================================================
-    # 4. LOOP DE ENTRENAMIENTO
-    # ============================================================
+        logger.info("Starting training from scratch")
     
     print(f"\n{'='*60}")
-    print("INICIO DEL ENTRENAMIENTO")
+    print("TRAINING STARTED")
     print("="*60 + "\n")
     
     try:
         for epoch in range(start_epoch, MAX_EPOCHS):
-            print(f"[ Época {epoch+1}/{MAX_EPOCHS} ]")
+            print(f"[Epoch {epoch+1}/{MAX_EPOCHS}]")
             
-            # Entrenar una época
             train_rmse = train_one_epoch(model, train_loader, criterion, optimizer)
             
-            # Validar
             val_rmse, val_mae, val_r2, _, _, val_out_of_bounds, val_rmse_by_cat = validate(
                 model, val_loader, criterion
             )
             
-            # Reportar métricas
-            print(f"   📉 Train RMSE: {train_rmse:.4f}%")
-            print(f"   🎯 Val RMSE:   {val_rmse:.4f}% (Optimizing Metric)")
-            print(f"   📊 Val MAE:    {val_mae:.4f}%  | R²: {val_r2:.4f}")
-            print(f"   🔍 Out-of-bounds: {val_out_of_bounds:.2f}%")
+            print(f"   Train RMSE: {train_rmse:.4f}%")
+            print(f"   Val RMSE:   {val_rmse:.4f}% (optimizing metric)")
+            print(f"   Val MAE:    {val_mae:.4f}% | R²: {val_r2:.4f}")
+            print(f"   Out-of-bounds: {val_out_of_bounds:.2f}%")
             
-            # v3.1: Reportar RMSE por categoría para identificar outliers
+            
             rmse_cat_str = " | ".join(
                 f"{cat[:3]}:{val_rmse_by_cat[cat]:.2f}"
                 for cat in CATEGORY_LABELS
             )
-            print(f"   📋 RMSE/Cat: {rmse_cat_str}")
+            print(f"   RMSE/Cat: {rmse_cat_str}")
             
-            # ReduceLROnPlateau: reduce LR si val_rmse no mejora
-            # v3.3: Sin warmup. LR=0.0001 es suficientemente bajo
-            # para arranque estable (sin BN1d que desestabilice).
-            
-            # NUEVO v3.2: Detectar reducciones de LR para tolerar ES
-            # El scheduler puede reducir LR EN ESTE PASO, lo que causaría
-            # que ES se dispare sin dar margen. Guardamos LR antes.
             lr_before = optimizer.param_groups[0]['lr']
             scheduler.step(val_rmse)
             current_lr = optimizer.param_groups[0]['lr']
             lr_just_reduced = (current_lr < lr_before)
             
-            print(f"   📈 Learning Rate: {current_lr:.6f}", end="")
+            print(f"   Learning Rate: {current_lr:.6f}", end="")
             if lr_just_reduced:
-                print(f" (reducido de {lr_before:.6e})")
+                print(f" (reduced from {lr_before:.6e})")
             else:
                 print()
             
-            # Guardar historial en CSV
             history_entry = {
                 'epoch': epoch + 1,
                 'train_rmse': train_rmse,
@@ -518,124 +354,110 @@ def main() -> None:
                 'val_out_of_bounds': val_out_of_bounds,
                 'learning_rate': current_lr
             }
-            # v3.1: Añadir RMSE por categoría al log para diagnóstico outliers
             for cat in CATEGORY_LABELS:
                 history_entry[f'rmse_{cat.lower()}'] = val_rmse_by_cat[cat]
             
             history.append(history_entry)
             pd.DataFrame(history).to_csv(str(LOG_FILE), index=False)
             
-            # Early Stopping: Mejor modelo encontrado?
             if val_rmse < best_val_rmse:
                 best_val_rmse = val_rmse
                 epochs_no_improve = 0
                 torch.save(model.state_dict(), str(SAVE_DIR / BEST_MODEL_NAME))
-                logger.info(f"¡Mejor modelo encontrado! RMSE = {best_val_rmse:.4f}")
-                print(f"   ✅ ¡Mejor modelo! RMSE = {best_val_rmse:.4f}")
+                logger.info(f"Best model found. RMSE: {best_val_rmse:.4f}")
+                print(f"   Best model found. RMSE: {best_val_rmse:.4f}")
             else:
-                # NUEVO v3.2: Tolerancia con ReduceLROnPlateau
-                # Si el scheduler acaba de reducir LR, no contar esta época para ES
-                # Justificación: ES y scheduler pueden competir causando parada prematura
-                # Este cambio da margen para que el modelo se recupere con LR reducido
                 epochs_no_improve += 1
                 
                 if lr_just_reduced:
-                    # Dar un "pase gratis" cuando LR se reduce
                     epochs_no_improve = max(0, epochs_no_improve - 1)
-                    print(f"   ⏳ Sin mejora: {epochs_no_improve}/{ES_PATIENCE} "
-                          f"(tolerancia: LR acaba de reducirse)")
+                    print(f"   No improvement: {epochs_no_improve}/{ES_PATIENCE} "
+                          f"(LR recently reduced)")
                 else:
-                    print(f"   ⏳ Sin mejora: {epochs_no_improve}/{ES_PATIENCE}")
+                    print(f"   No improvement: {epochs_no_improve}/{ES_PATIENCE}")
             
-            # Guardar checkpoint (para reanudar entrenamiento si se interrumpe)
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),  # ReduceLROnPlateau state
+                'scheduler_state_dict': scheduler.state_dict(),
                 'best_val_rmse': best_val_rmse,
                 'epochs_no_improve': epochs_no_improve
             }, str(CHECKPOINT_FILE))
             
-            # Early Stopping: ¿Alcanzamos la paciencia?
             if epochs_no_improve >= ES_PATIENCE:
                 logger.info(
-                    f"Early stopping activado después de "
-                    f"{epochs_no_improve} épocas sin mejora"
+                    f"Early stopping triggered after {epochs_no_improve} epochs without improvement"
                 )
                 print(
-                    f"\n🛑 EARLY STOPPING ACTIVADO "
-                    f"(después de {epochs_no_improve} épocas sin mejora)"
+                    f"\nEARLY STOPPING TRIGGERED "
+                    f"(no improvement for {epochs_no_improve} epochs)"
                 )
                 break
             
             print()  # Línea en blanco entre épocas
     
     except KeyboardInterrupt:
-        logger.warning("Entrenamiento interrumpido por usuario. Checkpoint guardado.")
-        print("\n⚠️ Entrenamiento interrumpido por usuario. Checkpoint guardado.")
+        logger.warning("Training interrupted by user. Checkpoint saved.")
+        print("\nTraining interrupted by user. Checkpoint saved.")
         return
     
     except Exception as e:
-        logger.error(f"Error durante entrenamiento: {e}")
-        print(f"\n❌ Error durante entrenamiento: {e}")
+        logger.error(f"Training error: {e}")
+        print(f"\nTraining error: {e}")
         traceback.print_exc()
         raise
     
-    # ============================================================
-    # 5. EVALUACIÓN FINAL EN TEST SET
-    # ============================================================
-    
     print(f"\n{'='*60}")
-    print("EVALUACIÓN FINAL EN TEST SET")
+    print("FINAL TEST SET EVALUATION")
     print("="*60 + "\n")
     
-    # Cargar mejor modelo para evaluación final
-    logger.info("Cargando mejor modelo guardado...")
-    print("Cargando mejor modelo guardado...")
+    logger.info("Loading best model...")
+    print("Loading best model...")
     model.load_state_dict(
         torch.load(str(SAVE_DIR / BEST_MODEL_NAME), map_location=DEVICE)
     )
     
-    # Evaluar en test set
     test_rmse, test_mae, test_r2, y_true, y_pred, test_out_of_bounds, test_rmse_by_cat = validate(
         model, test_loader, criterion
     )
     
-    # Reportar resultados finales
-    print(f"\n🎯 RESULTADOS FINALES TEST SET:")
-    print(f"   RMSE: {test_rmse:.4f}%  (Métrica de Optimización)")
-    print(f"   MAE:  {test_mae:.4f}%  (Diagnóstico)")
-    print(f"   R²:   {test_r2:.4f}     (Diagnóstico)")
+    print(f"\nFINAL TEST RESULTS:")
+    print(f"   RMSE: {test_rmse:.4f}% (optimizing metric)")
+    print(f"   MAE:  {test_mae:.4f}% (diagnostic)")
+    print(f"   R²:   {test_r2:.4f} (diagnostic)")
     print(f"   Out-of-bounds: {test_out_of_bounds:.2f}%")
     
-    # v3.1: Reportar RMSE por categoría en test set
-    print(f"\n📋 RMSE POR CATEGORÍA (Test Set):")
+    print(f"\nRMSE per Category (Test Set):")
     for cat in CATEGORY_LABELS:
         print(f"   {cat:12s}: {test_rmse_by_cat[cat]:.4f}%")
     logger.info(
         f"Test Results - RMSE: {test_rmse:.4f}, MAE: {test_mae:.4f}, R²: {test_r2:.4f}"
     )
     
-    # Generar reporte detallado con matriz de confusión
     generate_final_report(y_true, y_pred)
     
-    print(f"\n✅ Entrenamiento completado exitosamente")
-    print(f"   Mejor modelo:        {SAVE_DIR / BEST_MODEL_NAME}")
-    print(f"   Log entrenamiento:   {LOG_FILE}")
-    logger.info("Entrenamiento completado exitosamente")
-    
-    # ============================================================
-    # 6. GENERACIÓN DE GRÁFICAS
+    print(f"\nTraining completed successfully")
+    print(f"   Best model: {SAVE_DIR / BEST_MODEL_NAME}")
+    print(f"   Training log: {LOG_FILE}")
+    logger.info("Training completed successfully")
     # ============================================================
     
     print(f"\n📊 Generando gráficas de entrenamiento...")
     try:
-        from src.plot_results import plot_training_curves_v3
+        from src.plot_results import plot_training_curves_v3, plot_predictions_vs_reference
         
         plot_training_curves_v3(str(LOG_FILE), str(SAVE_DIR))
-        logger.info("Gráficas generadas con éxito")
-        print("✅ Gráficas generadas con éxito")
+        logger.info("Gráficas de entrenamiento generadas con éxito")
+        print("✅ Gráficas de entrenamiento generadas con éxito")
+        
+        # Generar gráficas de predicción vs referencia (Feedback tutor #3)
+        print(f"\n📊 Generando análisis de predicción vs referencia...")
+        test_df = pd.read_csv(str(TEST_CSV))
+        plot_predictions_vs_reference(y_true, y_pred, test_df, str(SAVE_DIR))
+        logger.info("Análisis de predicción vs referencia generado con éxito")
+        print("✅ Análisis completado con éxito")
+        
     except Exception as e:
         logger.warning(f"No se pudieron generar gráficas: {e}")
         print(f"⚠️ No se pudieron generar gráficas: {e}")
