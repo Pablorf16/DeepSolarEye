@@ -27,50 +27,6 @@ def parse_filename_regex(filename: str) -> dict:
     """
 
 
-def oversample_dataframe(df: pd.DataFrame, stratify_col: str = 'dirt_category') -> pd.DataFrame:
-    """Balance dataset by oversampling minority classes to match majority."""
-    max_count = df[stratify_col].value_counts().max()
-    
-    logger.info("\nDistribution BEFORE oversampling:")
-    for label in CATEGORY_LABELS:
-        count = (df[stratify_col] == label).sum()
-        pct = 100 * count / len(df) if len(df) > 0 else 0
-        logger.info(f"  {label:12s}: {count:4d} ({pct:5.1f}%)")
-    
-    dfs_oversampled = []
-    for label in CATEGORY_LABELS:
-        class_df = df[df[stratify_col] == label]
-        if len(class_df) < max_count:
-            oversampled = class_df.sample(
-                n=max_count,
-                replace=True,
-                random_state=RANDOM_STATE
-            )
-            dfs_oversampled.append(oversampled)
-        else:
-            dfs_oversampled.append(class_df)
-    
-    df_balanced = pd.concat(dfs_oversampled, ignore_index=True)
-    df_balanced = df_balanced.sample(
-        frac=1,
-        random_state=RANDOM_STATE
-    ).reset_index(drop=True)
-    
-    logger.info("\nDistribution AFTER oversampling:")
-    for label in CATEGORY_LABELS:
-        count = (df_balanced[stratify_col] == label).sum()
-        pct = 100 * count / len(df_balanced) if len(df_balanced) > 0 else 0
-        logger.info(f"  {label:12s}: {count:4d} ({pct:5.1f}%)")
-    
-    expansion_pct = 100 * (len(df_balanced) - len(df)) / len(df)
-    logger.info(
-        f"Dataset expanded: {len(df)} → {len(df_balanced)} "
-        f"samples (+{expansion_pct:.1f}%)"
-    )
-    
-    return df_balanced
-
-
 def process_and_split() -> None:
     """Pipeline: recursive extraction → metadata parsing → stratified split."""
     logger.info(f"Starting extraction from: {RAW_DATA_DIR}")

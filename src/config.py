@@ -18,7 +18,6 @@ SEED = 42
 BATCH_SIZE = 32
 LEARNING_RATE = 0.0001
 MAX_EPOCHS = 150
-WARMUP_EPOCHS = 0
 ES_PATIENCE = 15
 SCHEDULER_PATIENCE = 7
 SCHEDULER_FACTOR = 0.5
@@ -84,7 +83,6 @@ LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 LOG_LEVEL = 'INFO'
 
 # Training log and model checkpoint names
-TRModel diagnostics
 OUT_OF_BOUNDS_DIAGNOSTIC = True
 OUT_OF_BOUNDS_MIN = 0
 OUT_OF_BOUNDS_MAX = 100
