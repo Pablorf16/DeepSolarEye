@@ -1,4 +1,7 @@
-﻿
+﻿"""
+Pipeline de entrenamiento orquestado para DeepSolarEye v4.0.
+Gestiona el bucle de entrenamiento, validación, early stopping tolerante y generación de reportes y gráficas del modelo convolucional
+"""
 
 import logging
 import os
@@ -35,7 +38,7 @@ from src.config import (
 )
 from src.dataset import SolarPanelDataset, get_transforms
 from src.model import Net
-
+# Configuración de logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -43,7 +46,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Reproducibility: set seed across all libraries
+# Reproducibilidad: establece semilla en todas las librerías para resultados consistentes
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
@@ -51,7 +54,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(SEED)
     torch.backends.cudnn.deterministic = True
 
-# Dynamic paths for cross-platform compatibility
+# Rutas dinámicas para compatibilidad multiplataforma (Windows, Linux, macOS)
 BASE_DIR = Path(__file__).resolve().parent.parent
 TRAIN_CSV = BASE_DIR / 'data' / 'processed' / 'train_dataset.csv'
 VAL_CSV = BASE_DIR / 'data' / 'processed' / 'val_dataset.csv'
@@ -68,7 +71,7 @@ def train_one_epoch(
     criterion: nn.Module,
     optimizer: optim.Optimizer,
 ) -> float:
-    """Train model for one epoch. Returns training RMSE."""
+    """Entrena el modelo durante un episodio"""
     model.train()
     total_mse = 0.0
     num_samples = 0
@@ -86,7 +89,7 @@ def train_one_epoch(
         loss = criterion(outputs.squeeze(dim=1), labels)
         loss.backward()
 
-        # Gradient clipping prevents exploding gradients
+        # Clipping de gradientes: evita gradientes explosivos durante backpropagation
         torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_MAX_NORM)
         optimizer.step()
 
@@ -104,9 +107,11 @@ def validate(
     loader: DataLoader,
     criterion: nn.Module,
 ) -> Tuple[float, float, float, np.ndarray, np.ndarray, float, dict]:
-    """Evaluate model on validation/test set with comprehensive metrics.
-    
-    Returns: (rmse, mae, r2, y_true, y_pred, out_of_bounds_pct, rmse_by_cat)
+    """Evalúa el modelo en los conjuntos de validación o test.
+
+    Returns:
+        Tuple que contiene métricas de rendimiento (RMSE, MAE, R2), 
+        vectores de predicción, porcentaje fuera de límites y RMSE por categoría.
     """
     model.eval()
     total_mse = 0.0
@@ -139,7 +144,7 @@ def validate(
     out_of_bounds = np.sum((all_preds < 0) | (all_preds > 100))
     out_of_bounds_pct = 100 * out_of_bounds / len(all_preds)
     
-    # Compute RMSE per category for diagnostic analysis
+    # Calcula RMSE por categoría para análisis diagnóstico (Q1, Q2, Q3, Q4)
     rmse_by_cat = {}
     true_cats = pd.cut(
         all_labels,
@@ -162,7 +167,7 @@ def generate_final_report(
     y_true: np.ndarray,
     y_pred: np.ndarray,
 ) -> None:
-    """Generate confusion matrix report with categorical discretization."""
+    """Imprime por consola la matriz de confusión basada en las categorías de suciedad."""
     print("\n" + "=" * 60)
     print("FINAL VALIDATION REPORT (TEST SET)")
     print("=" * 60)
@@ -198,7 +203,7 @@ def generate_final_report(
 
 
 def main() -> None:
-    """Main training orchestration pipeline."""
+    """Orquesta el flujo principal de entrenamiento y evaluación."""
     
     print(f"\n{'='*60}")
     print("Starting Training Pipeline")
@@ -215,14 +220,14 @@ def main() -> None:
     
     logger.info("Loading datasets...")
     try:
-        # Train: equilibrado por cuartiles (25% por categoría, NO oversample)
+        # Entrenamiento: equilibrado por cuartiles dinámicos (25% por categoría, sin oversampling)
         train_ds = SolarPanelDataset(
             str(TRAIN_CSV),
             str(IMG_DIR),
             transform=get_transforms('train'),
             )
         
-        # Val: original (estratificado, sin modificaciones)
+        # Validación: estratificado, sin modificaciones
         val_ds = SolarPanelDataset(
             str(VAL_CSV),
             str(IMG_DIR),
@@ -230,7 +235,7 @@ def main() -> None:
             verbose=False
         )
         
-        # Test: original (estratificado, sin modificaciones)
+        # Test: estratificado, sin modificaciones
         test_ds = SolarPanelDataset(
             str(TEST_CSV),
             str(IMG_DIR),
@@ -238,17 +243,16 @@ def main() -> None:
             verbose=False
         )
         
-        print(f"   Train (Cuartiles): {len(train_ds)} samples")
+        print(f"   Train (Quartiles): {len(train_ds)} samples")
         print(f"   Val: {len(val_ds)} samples")
         print(f"   Test: {len(test_ds)} samples")
         
     except Exception as e:
-        logger.error(f"Error cargando datasets: {e}")
+        logger.error("Error loading datasets: %s", e)
         raise
     
-    # Crear DataLoaders (sin WeightedRandomSampler, usamos shuffle normal)
-    # drop_last=True: Evita batches de tamaño 1 que causan error en
-    # BatchNorm2d de los Analysis Units de la CNN
+    # drop_last=True: evita batches de tamaño 1 que causan error en BatchNorm2d
+    # de las capas convolucionales de la CNN
     train_loader = DataLoader(
         train_ds,
         batch_size=BATCH_SIZE,
@@ -303,7 +307,7 @@ def main() -> None:
             print(f"   Best val RMSE: {best_val_rmse:.4f}")
 
         except RuntimeError as e:
-            logger.warning(f"Checkpoint incompatible: {e}")
+            logger.warning("Checkpoint incompatible: %s", e)
             logger.warning("Starting training from scratch...")
     else:
         logger.info("Starting training from scratch")
@@ -327,13 +331,14 @@ def main() -> None:
             print(f"   Val MAE:    {val_mae:.4f}% | R²: {val_r2:.4f}")
             print(f"   Out-of-bounds: {val_out_of_bounds:.2f}%")
             
-            
+            # Métricas por categoría para diagnóstico (Q1_Limpio, Q2_Moderado, Q3_Alto, Q4_Crítico)
             rmse_cat_str = " | ".join(
                 f"{cat[:3]}:{val_rmse_by_cat[cat]:.2f}"
                 for cat in CATEGORY_LABELS
             )
-            print(f"   RMSE/Cat: {rmse_cat_str}")
+            print(f"   RMSE/Category: {rmse_cat_str}")
             
+            # Early Stopping TOLERANTE v4.0
             lr_before = optimizer.param_groups[0]['lr']
             scheduler.step(val_rmse)
             current_lr = optimizer.param_groups[0]['lr']
@@ -364,11 +369,13 @@ def main() -> None:
                 best_val_rmse = val_rmse
                 epochs_no_improve = 0
                 torch.save(model.state_dict(), str(SAVE_DIR / BEST_MODEL_NAME))
-                logger.info(f"Best model found. RMSE: {best_val_rmse:.4f}")
                 print(f"   Best model found. RMSE: {best_val_rmse:.4f}")
+                
             else:
                 epochs_no_improve += 1
                 
+                # Mecanismo TOLERANTE v4.0: cuando LR se reduce, reduce penalizador 1 época
+                # Permite 5-8 épocas de adaptación adicionales antes de detener
                 if lr_just_reduced:
                     epochs_no_improve = max(0, epochs_no_improve - 1)
                     print(f"   No improvement: {epochs_no_improve}/{ES_PATIENCE} "
@@ -386,11 +393,8 @@ def main() -> None:
             }, str(CHECKPOINT_FILE))
             
             if epochs_no_improve >= ES_PATIENCE:
-                logger.info(
-                    f"Early stopping triggered after {epochs_no_improve} epochs without improvement"
-                )
                 print(
-                    f"\nEARLY STOPPING TRIGGERED "
+                    f"\n EARLY STOPPING ACTIVATED "
                     f"(no improvement for {epochs_no_improve} epochs)"
                 )
                 break
@@ -398,13 +402,11 @@ def main() -> None:
             print()  # Línea en blanco entre épocas
     
     except KeyboardInterrupt:
-        logger.warning("Training interrupted by user. Checkpoint saved.")
-        print("\nTraining interrupted by user. Checkpoint saved.")
+        print("\n  Training interrupted by user. Checkpoint saved.")
         return
     
     except Exception as e:
-        logger.error(f"Training error: {e}")
-        print(f"\nTraining error: {e}")
+        print(f"\nError during training: {e}")
         traceback.print_exc()
         raise
     
@@ -412,8 +414,7 @@ def main() -> None:
     print("FINAL TEST SET EVALUATION")
     print("="*60 + "\n")
     
-    logger.info("Loading best model...")
-    print("Loading best model...")
+    print(" Loading best model...")
     model.load_state_dict(
         torch.load(str(SAVE_DIR / BEST_MODEL_NAME), map_location=DEVICE)
     )
@@ -432,35 +433,31 @@ def main() -> None:
     for cat in CATEGORY_LABELS:
         print(f"   {cat:12s}: {test_rmse_by_cat[cat]:.4f}%")
     logger.info(
-        f"Test Results - RMSE: {test_rmse:.4f}, MAE: {test_mae:.4f}, R²: {test_r2:.4f}"
+        "Test Results - RMSE: %.4f, MAE: %.4f, R²: %.4f", test_rmse, test_mae, test_r2
     )
     
     generate_final_report(y_true, y_pred)
+    print(f"\n Training completed successfully")
+    print(f"   Model: {SAVE_DIR / BEST_MODEL_NAME}")
+    print(f"   Log: {LOG_FILE}")
     
-    print(f"\nTraining completed successfully")
-    print(f"   Best model: {SAVE_DIR / BEST_MODEL_NAME}")
-    print(f"   Training log: {LOG_FILE}")
-    logger.info("Training completed successfully")
-    # ============================================================
-    
-    print(f"\n📊 Generando gráficas de entrenamiento...")
+    print(f"\n Generating training visualizations...")
     try:
         from src.plot_results import plot_training_curves_v3, plot_predictions_vs_reference
         
         plot_training_curves_v3(str(LOG_FILE), str(SAVE_DIR))
-        logger.info("Gráficas de entrenamiento generadas con éxito")
-        print("✅ Gráficas de entrenamiento generadas con éxito")
+        print(" Training curves generated")
         
-        # Generar gráficas de predicción vs referencia (Feedback tutor #3)
-        print(f"\n📊 Generando análisis de predicción vs referencia...")
+        
+        # Generar gráficas de predicción vs referencia
+        print(f" Generating prediction vs reference analysis...")
         test_df = pd.read_csv(str(TEST_CSV))
         plot_predictions_vs_reference(y_true, y_pred, test_df, str(SAVE_DIR))
-        logger.info("Análisis de predicción vs referencia generado con éxito")
-        print("✅ Análisis completado con éxito")
+        print(" Prediction analysis completed")
+        
         
     except Exception as e:
-        logger.warning(f"No se pudieron generar gráficas: {e}")
-        print(f"⚠️ No se pudieron generar gráficas: {e}")
+        print(f"  Error generating visualizations (see log): {e}")
 
 
 if __name__ == "__main__":

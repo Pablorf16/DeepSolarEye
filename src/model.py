@@ -1,21 +1,24 @@
-﻿
+﻿"""
+Arquitectura CNN con bloques residuales para DeepSolarEye v4.0.
+
+Implementa una red convolucional personalizada con 5 Unidades Convolucionales
+Residales (RCU) progresivas y fusión multimodal de características visuales
+y ambientales para regresión de pérdida de potencia en paneles solares.
+
+"""
 
 
 import torch
 import torch.nn as nn
-
 from src.config import NUM_ENV_FEATURES
 
-
 class Net(nn.Module):
-    """Custom CNN for soiling prediction with environmental feature injection."""
 
     def __init__(self) -> None:
-        """Initialize network architecture."""
+        """Inicializa la arquitectura de la red neuronal."""
         super(Net, self).__init__()
 
-        # Etapa inicial: normalización y feature extraction
-        # Conv 7x7 para receptive field grande, BN para estabilidad
+        # Etapa inicial: extracción de características primarias
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=7,
                                padding=3)
         self.bn1 = nn.BatchNorm2d(16)
@@ -23,8 +26,8 @@ class Net(nn.Module):
         self.dropout = nn.Dropout(p=0.5)
         self.relu = nn.ReLU(inplace=True)
 
-        # Unidades residuales: paso de dimensión (1x1) + doble conv 5x5
-        # Progresión: 16→32→48→64→80→96 canales, cada una reduce 2x spatial
+        # Unidades Convolucionales Residuales (RCU)
+        # Progresión de canales: 16->32->48->64->80->96 con reducción 2x por RCU
         self.rcu1_conv = nn.Conv2d(16, 32, kernel_size=1, stride=2)
         self.rcu1 = nn.Sequential(
             nn.Conv2d(32, 32, kernel_size=5, padding=2),
@@ -70,49 +73,54 @@ class Net(nn.Module):
             nn.BatchNorm2d(96)
         )
 
-        # Rama visual: 384 features (96 canales × 2×2 spatial) → 96 → 96
-        # Dropout evita overfitting en capas densas
+        # Capas densas de la rama visual
         self.fu = nn.Linear(384, 96)
         self.fc0 = nn.Linear(96, 96)
         
-        # Salida: concat de rama visual (96) + features ambientales (1)
-        # Regresión abierta (sin sigmoid) para diagnóstico irrestricto
+        # Capa de salida: fusión multimodal visual + ambiental
+        # Input: 96 (visual) + NUM_ENV_FEATURES (irradiancia) -> Output: 1 (pérdida %)
         self.fc_final = nn.Linear(96 + NUM_ENV_FEATURES, 1)
 
     def forward(self, x: torch.Tensor, env: torch.Tensor) -> torch.Tensor:
-        """Forward pass with image and environmental feature processing."""
+        """Procesa imagen y features ambientales mediante forward pass multimodal."""
         # Etapa inicial: normalizar features de entrada
         x = self.relu(self.bn1(self.conv1(x)))
 
-        # Unidades residuales: projection + doble conv + suma residual
-        # Cada unidad: dimX → dimX+1 (espacio) y reduce spatial 2×
+        # Unidades residuales: proyección + convoluciones + conexión residual
+        # Estrategia: cada RCU incrementa canal y reduce espacial 2x
+        # RCU 1: 16->32 canales (stride=2)
         proj = self.rcu1_conv(x)
         x = self.relu(proj + self.rcu1(proj))
 
+        # RCU 2: 32->48 canales (stride=2)
         proj = self.rcu2_conv(x)
         x = self.relu(proj + self.rcu2(proj))
 
+        # RCU 3: 48->64 canales (stride=2)
         proj = self.rcu3_conv(x)
         x = self.relu(proj + self.rcu3(proj))
 
+        # RCU 4: 64->80 canales (stride=2)
         proj = self.rcu4_conv(x)
         x = self.relu(proj + self.rcu4(proj))
 
+        # RCU 5: 80->96 canales (stride=2)
         proj = self.rcu5_conv(x)
         x = self.relu(proj + self.rcu5(proj))
 
-        # Global pooling: reduce spatial → vector único por muestra
-        x = self.pool(x)
-        x = x.view(x.shape[0], -1)
+        # Agregación global: pooling promedio + aplanado
+        x = self.pool(x)  # AvgPool2d reduce espacial a 1x1
+        x = x.view(x.shape[0], -1)  # Flatten para conexión densa
         
-        # Rama visual: 2 capas fully connected con dropout y ReLU
-        x = self.relu(self.dropout(self.fu(x)))
-        x = self.relu(self.dropout(self.fc0(x)))
+        # Rama visual: compresión y procesamiento denso
+        x = self.relu(self.dropout(self.fu(x)))   # 384 -> 96 con regularización
+        x = self.relu(self.dropout(self.fc0(x)))  # 96 -> 96 con regularización
         
-        # Inyección ambiental: concatenar irradiance directamente
-        x = torch.cat((x, env), dim=1)
+        # Fusión multimodal: concatenar features visuales + ambientales
+        x = torch.cat((x, env), dim=1)  # [96] + [1] = [97]
         
-        # Salida: regresión sin activación para rango abierto [−∞, +∞]
+        # Capa de salida: regresión lineal sin clamping
+        # Permite predicciones fuera de [0, 100] para casos extremos
         output = self.fc_final(x)
         
         return output

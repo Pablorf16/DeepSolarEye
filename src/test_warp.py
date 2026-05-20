@@ -69,7 +69,7 @@ def probar_recorte() -> bool:
     
     logger.info("Image loaded successfully. Applying transformation...")
     
-    # Geometry: relative coordinates
+    # Geometría: Coordenadas relativas
     h, w = img.shape[:2]
     pts_origen = np.float32([
         [w * 0.15, h * 0.10],   # Top-left
@@ -84,7 +84,7 @@ def probar_recorte() -> bool:
         [0, IMG_SIZE]
     ])
     
-    # Perspective transformation
+    # Transformación de perspectiva
     matriz = cv2.getPerspectiveTransform(pts_origen, pts_destino)
     img_aplanada = cv2.warpPerspective(img, matriz, (IMG_SIZE, IMG_SIZE))
     

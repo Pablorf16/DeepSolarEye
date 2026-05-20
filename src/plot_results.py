@@ -22,7 +22,18 @@ def plot_training_curves_v3(log_file, save_dir):
         return False
     
     try:
-        df = pd.read_csv(log_file)
+        # Intentar leer con diferentes encodings
+        df = None
+        for encoding in ['utf-8', 'utf-16', 'latin-1', 'cp1252', 'iso-8859-1']:
+            try:
+                df = pd.read_csv(log_file, encoding=encoding)
+                break
+            except:
+                continue
+        
+        if df is None:
+            print(f"Error: No se pudo leer {log_file}")
+            return False
         
         # Crear figura con subgráficos
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
@@ -35,14 +46,9 @@ def plot_training_curves_v3(log_file, save_dir):
         ax1.plot(df['epoch'], df['train_rmse'], label='Train RMSE', color='#1f77b4', linewidth=2, marker='o', markersize=3)
         ax1.plot(df['epoch'], df['val_rmse'], label='Val RMSE (Optimizing)', color='#ff7f0e', linewidth=2.5, marker='s', markersize=3)
         ax1.scatter(best_epoch['epoch'], best_epoch['val_rmse'], color='red', s=100, zorder=5, edgecolors='darkred', linewidth=2)
-        ax1.annotate(f"Best: {best_epoch['val_rmse']:.3f}%\nEpoch {int(best_epoch['epoch'])}", 
-                     (best_epoch['epoch'], best_epoch['val_rmse']),
-                     textcoords="offset points", xytext=(10, 10), 
-                     ha='left', fontsize=9, fontweight='bold', color='red',
-                     bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.3))
         
-        ax1.set_xlabel('Epochs', fontsize=11)
-        ax1.set_ylabel('RMSE (%)', fontsize=11)
+        ax1.set_xlabel('Episodios', fontsize=14, fontweight='bold')
+        ax1.set_ylabel('RMSE (%)', fontsize=14, fontweight='bold')
         ax1.set_title('RMSE (Optimization Metric)', fontsize=12, fontweight='bold')
         ax1.grid(True, linestyle='--', alpha=0.5)
         ax1.legend(loc='upper right', fontsize=10)
@@ -51,8 +57,8 @@ def plot_training_curves_v3(log_file, save_dir):
         ax2 = axes[0, 1]
         ax2.plot(df['epoch'], df['val_mae'], label='Val MAE', color='#2ca02c', linewidth=2.5, marker='^', markersize=3)
         ax2.fill_between(df['epoch'], df['val_mae'], alpha=0.3, color='#2ca02c')
-        ax2.set_xlabel('Epochs', fontsize=11)
-        ax2.set_ylabel('MAE (%)', fontsize=11)
+        ax2.set_xlabel('Episodios', fontsize=14, fontweight='bold')
+        ax2.set_ylabel('MAE (%)', fontsize=14, fontweight='bold')
         ax2.set_title('MAE (Diagnostic)', fontsize=12, fontweight='bold')
         ax2.grid(True, linestyle='--', alpha=0.5)
         ax2.legend(loc='upper right', fontsize=10)
@@ -62,8 +68,8 @@ def plot_training_curves_v3(log_file, save_dir):
         ax3.plot(df['epoch'], df['val_r2'], label='Val R²', color='#d62728', linewidth=2.5, marker='D', markersize=3)
         ax3.axhline(y=0.7, color='green', linestyle='--', linewidth=1, label='R² = 0.7 (Acceptable)', alpha=0.7)
         ax3.fill_between(df['epoch'], df['val_r2'], alpha=0.3, color='#d62728')
-        ax3.set_xlabel('Epochs', fontsize=11)
-        ax3.set_ylabel('R² (Coefficient)', fontsize=11)
+        ax3.set_xlabel('Episodios', fontsize=14, fontweight='bold')
+        ax3.set_ylabel('R² (Coefficient)', fontsize=14, fontweight='bold')
         ax3.set_title('R² (Diagnostic)', fontsize=12, fontweight='bold')
         ax3.grid(True, linestyle='--', alpha=0.5)
         ax3.legend(loc='lower right', fontsize=10)
@@ -72,8 +78,8 @@ def plot_training_curves_v3(log_file, save_dir):
         # Learning rate plot
         ax4 = axes[1, 1]
         ax4.semilogy(df['epoch'], df['learning_rate'], label='Learning Rate', color='#9467bd', linewidth=2.5, marker='o', markersize=3)
-        ax4.set_xlabel('Epochs', fontsize=11)
-        ax4.set_ylabel('Learning Rate (log scale)', fontsize=11)
+        ax4.set_xlabel('Episodios', fontsize=14, fontweight='bold')
+        ax4.set_ylabel('Learning Rate (log scale)', fontsize=14, fontweight='bold')
         ax4.set_title('Learning Rate Schedule', fontsize=12, fontweight='bold')
         ax4.grid(True, linestyle='--', alpha=0.5, which='both')
         ax4.legend(loc='upper right', fontsize=10)
